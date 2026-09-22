@@ -1,4 +1,4 @@
-# End of quarter and month functions.
+# RBAtools end of quarter and month functions.
 # Defined separately because rbatools has some bad dependencies.
 
 end_of_quarter <- function (date, q_offset = 0) 

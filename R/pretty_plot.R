@@ -185,7 +185,9 @@ ezdyn_prepare_alt_path_data <- function(df, baseline_name, collapse_baseline) {
 }
 
 # Build deterministic line colours, reserving the requested colour for Baseline.
-ezdyn_pretty_line_colours <- function(line_labels, baseline_name, baseline_colour) {
+# `model_colours` (optional) is a line_label-keyed override, e.g. built by
+# `ezdyn_line_label_colours()`, letting individual models keep a fixed colour.
+ezdyn_pretty_line_colours <- function(line_labels, baseline_name, baseline_colour, model_colours = NULL) {
 	if (!is.character(baseline_colour) || length(baseline_colour) != 1 ||
 		is.na(baseline_colour) || baseline_colour == "") {
 		stop("`baseline_colour` must be one non-empty colour value.", call. = FALSE)
@@ -195,10 +197,29 @@ ezdyn_pretty_line_colours <- function(line_labels, baseline_name, baseline_colou
 	colours <- grDevices::hcl.colors(max(length(other_labels), 1L), palette = "Dynamic")
 	colours <- rep_len(colours, length(other_labels))
 	names(colours) <- other_labels
+	if (!is.null(model_colours)) {
+		overrides <- model_colours[other_labels]
+		has_override <- !is.na(overrides)
+		colours[has_override] <- overrides[has_override]
+	}
 	if (baseline_name %in% line_labels) {
 		colours <- c(stats::setNames(baseline_colour, baseline_name), colours)
 	}
 	colours
+}
+
+# Return a line_label -> model_colour override lookup (NULL if the data
+# carries no model_colour column, e.g. data predating this feature).
+ezdyn_line_label_colours <- function(df) {
+	if (!("model_colour" %in% names(df)) || !("line_label" %in% names(df))) {
+		return(NULL)
+	}
+	lookup <- unique(df[, c("line_label", "model_colour")])
+	lookup <- lookup[!is.na(lookup$model_colour), , drop = FALSE]
+	if (nrow(lookup) == 0) {
+		return(NULL)
+	}
+	stats::setNames(lookup$model_colour, lookup$line_label)
 }
 
 # Omit overlapping Date labels at the rendered width.
@@ -208,26 +229,51 @@ ezdyn_alt_path_date_scale <- function() {
 	)
 }
 
+#' Resolve the plotting backend, falling back to ggplot2 when ggrba is unavailable.
+#'
+#' `NULL` (the public plotting functions' default) auto-selects `"ggrba"` when
+#' the optional ggrba package is installed, otherwise falls back to
+#' `"ggplot"`. An explicit `"ggrba"` request still errors when the package is
+#' not installed, since that is an explicit user choice rather than a default.
+#'
+#' @param plotter `NULL`, `"ggrba"`, or `"ggplot"`.
+#' @param ggrba_available Whether the optional ggrba package is installed.
+#'   Exposed as an argument so callers (including tests) can inject
+#'   availability without depending on the real installed-package state.
+#'
+#' @return `"ggrba"` or `"ggplot"`.
+#' @keywords internal
+ezdyn_resolve_plotter <- function(plotter = NULL, ggrba_available = requireNamespace("ggrba", quietly = TRUE)) {
+	if (is.null(plotter)) {
+		return(if (ggrba_available) "ggrba" else "ggplot")
+	}
+	plotter <- match.arg(plotter, c("ggrba", "ggplot"))
+	if (plotter == "ggrba" && !ggrba_available) {
+		stop("`plotter = \"ggrba\"` requires the optional ggrba package. Use `plotter = \"ggplot\"` or install ggrba.", call. = FALSE)
+	}
+	plotter
+}
+
 #' Build a graph from pretty IRF or alternative-path data.
 #'
 #' @param df Data frame created by [pretty_irf()] or [get_alt_paths()].
 #' @param line_style How to treat shock/model combinations for lines.
-#' @param plotter Plotting backend. `"ggrba"` (default) or `"ggplot"`.
+#' @param plotter Plotting backend, `"ggrba"` or `"ggplot"`. `NULL` (default)
+#'   uses `"ggrba"` when the optional ggrba package is installed, otherwise
+#'   falls back to `"ggplot"`.
 #' @param custom_title Provide custom title if TRUE.
 #' @param baseline_name Label used for an alternative-path baseline.
 #' @param baseline_colour Colour used for an alternative-path baseline.
+#' @param date_range Optional two-Date x-axis range for alternative-path plots.
 #'
 #' @return List containing the `graph` and `graph_fname`.
 #' @export
 plot_pretty_graph <- function(df, line_style=c("combined", "split"),
-							   plotter=c("ggrba", "ggplot"),
+							   plotter=NULL,
 							   custom_title=NULL, baseline_name="Baseline",
-							   baseline_colour="royalblue") {
+								   baseline_colour="royalblue", date_range=NULL) {
 	line_style <- match.arg(line_style)
-	plotter <- match.arg(plotter)
-	if (plotter == "ggrba" && !requireNamespace("ggrba", quietly = TRUE)) {
-		stop("`plotter = \"ggrba\"` requires the optional ggrba package. Use `plotter = \"ggplot\"` or install ggrba.", call. = FALSE)
-	}
+	plotter <- ezdyn_resolve_plotter(plotter)
 	is_alt_path <- ezdyn_is_alt_path(df)
 	unit_column <- if (is_alt_path) "unit_symbol_baseline" else "unit_symbol_irf"
 	ezdyn_validate_pretty_irf_units(df, unit_symbol_column=unit_column)
@@ -236,6 +282,14 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 	subtitle_ <- unique(df$display_unit)
 	df_plot <- df |>
 		dplyr::filter(!is.na(value))
+	if (is_alt_path) {
+		# Keep the legend/colour order Baseline-first (`legend_labels`), but draw
+		# Baseline last (highest factor level) so it always renders on top of,
+		# rather than underneath, overlapping alternative-path lines.
+		legend_labels <- unique(df_plot$line_label)
+		draw_labels <- c(setdiff(legend_labels, baseline_name), intersect(legend_labels, baseline_name))
+		df_plot$line_label <- factor(df_plot$line_label, levels = draw_labels)
+	}
 	unit_labels <- unname(unit_symbols[response_vars])
 	y_breaks_common <- scales::breaks_pretty(n = 5)
 	graph_fname <- if (length(response_vars) == 1) {
@@ -260,7 +314,7 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 			(if (is_alt_path) ezdyn_alt_path_date_scale() else ggplot2::geom_hline(yintercept = 0)) +
 			ggplot2::scale_y_continuous(breaks = y_breaks_common) +
 			ggplot2::labs(x = if (is_alt_path) NULL else "Quarter") +
-			ggplot2::theme_minimal()
+			ggplot2::theme_classic(base_size = 11 * 1.25)
 	}
 
 	line_layer <- if (is_alt_path || line_style == "combined") {
@@ -274,23 +328,40 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 																						colour=shock, linetype=model_name))
 	}
 	graph <- graph + line_layer
+	if (is_alt_path && !is.null(date_range)) {
+		if (!inherits(date_range, "Date") || length(date_range) != 2 || anyNA(date_range)) {
+			stop("`date_range` must contain two non-missing Date values for alternative paths.", call. = FALSE)
+		}
+		graph <- graph + ggplot2::coord_cartesian(xlim = date_range)
+	}
 
 	if (plotter == "ggplot" || is_alt_path) {
 		colour_levels <- if (is_alt_path || line_style == "combined") {
-			unique(df_plot$line_label)
+			if (is_alt_path) legend_labels else unique(df_plot$line_label)
 		} else {
 			unique(df_plot$shock)
 		}
+		label_colours <- if (is_alt_path || line_style == "combined") ezdyn_line_label_colours(df_plot) else NULL
 		colour_values <- if (is_alt_path) {
-			ezdyn_pretty_line_colours(colour_levels, baseline_name, baseline_colour)
+			ezdyn_pretty_line_colours(colour_levels, baseline_name, baseline_colour, model_colours = label_colours)
 		} else {
 			values <- grDevices::hcl.colors(max(length(colour_levels), 1L), palette = "Dynamic")
 			values <- rep_len(values, length(colour_levels))
 			names(values) <- colour_levels
+			if (!is.null(label_colours)) {
+				overrides <- label_colours[colour_levels]
+				has_override <- !is.na(overrides)
+				values[has_override] <- overrides[has_override]
+			}
 			values
 		}
 		graph <- graph +
-			ggplot2::scale_colour_manual(values = colour_values, name = NULL) +
+			ggplot2::scale_colour_manual(
+				values = colour_values,
+				breaks = colour_levels,
+				drop = FALSE,
+				name = NULL
+			) +
 			ggplot2::guides(colour = ggplot2::guide_legend(title = NULL))
 	}
 
@@ -305,7 +376,8 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 		if (plotter == "ggrba") {
 			graph <- graph +
 				ggplot2::labs(title=custom_title, subtitle=subtitle_) +
-				ggrba::scale_y_continuous_rba(units=unname(unit_symbols[[response_vars]]))
+				ggrba::scale_y_continuous_rba(units=unname(unit_symbols[[response_vars]])) +
+				(if (is_alt_path) ggrba::footnote_rba("Source: RBA") else NULL)
 		} else {
 			graph <- graph +
 				ggplot2::labs(
@@ -315,9 +387,9 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 				)
 		}
 	} else {
-	  if (is.null(custom_title)) {
-	    custom_title <- if (is_alt_path) "Alternative policy paths" else "IRF Responses"
-	  }
+		if (is.null(custom_title)) {
+			custom_title <- if (is_alt_path) "Alternative policy paths" else "IRF Responses"
+		}
 
 		if (plotter == "ggrba") {
 			graph <- graph +
@@ -366,14 +438,20 @@ pretty_irf <- function(irf_data, M_) {
         }, .keep=F) |>
         dplyr::bind_rows() |>
         # TODO: rename dynare_name to be something more generic.
-        tidyr::pivot_longer(cols = -c(t, shock), names_to = "dynare_name", values_to = "value")
+        tidyr::pivot_longer(cols = -c(t, shock), names_to = "dynare_name", values_to = "value") |>
+        # Add metadata-declared derived variables (e.g. year-ended inflation,
+        # the change in the cash rate) whose source is a native response.
+        ezdyn_augment_derived_irf_rows(M_$varmeta)
     # Get the names and units for each of the response variables.
     names_units <- display_names_and_units(unique(irf_data$dynare_name),  M_, unit_symbol_irf=T, unit_symbol_baseline=T) |>
 		dplyr::mutate(display_unit = ifelse(is.na(display_unit), "", display_unit))
 
 	irf_data |>
         dplyr::left_join(names_units, by = dplyr::join_by(dynare_name == Variable)) |>
-        dplyr::mutate(model_name = M_$model_name)
+        dplyr::mutate(
+            model_name = M_$model_name,
+            model_colour = if (is.null(M_$model_colour)) NA_character_ else M_$model_colour
+        )
 }
 
 
@@ -389,7 +467,9 @@ pretty_irf <- function(irf_data, M_) {
 #' @param shocks Optional vector of shocks to include (default all).
 #' @param line_style "combined" uses a single legend for shock-model pairs; "split"
 #'   uses colour for shock and linetype for model.
-#' @param plotter Plotting backend. `"ggrba"` (default) or `"ggplot"`.
+#' @param plotter Plotting backend, `"ggrba"` or `"ggplot"`. `NULL` (default)
+#'   uses `"ggrba"` when the optional ggrba package is installed, otherwise
+#'   falls back to `"ggplot"`.
 #' @param title Provide a custom title for the chart.
 #' @param cumulate Cumulate the response variables. Can be FALSE (default), TRUE, or a
 #' string vector for which display names the responses should be cumulated for. TODO:
@@ -398,6 +478,7 @@ pretty_irf <- function(irf_data, M_) {
 #' @param baseline_colour Colour used for the shared alternative-path baseline.
 #' @param collapse_baseline Whether to collapse identical manually duplicated
 #'   alternative-path baseline rows. Non-identical duplicates always error.
+#' @param date_range Optional two-Date x-axis range for alternative-path plots.
 #' @details
 #' For each `display_name`, the plotting pipeline requires one unique non-empty
 #' value for `units`/`display_unit`. IRFs use `unit_symbol_irf`; alternative
@@ -412,13 +493,14 @@ plot_pretty <- function(df,
 									dynare_names=NULL,
 									shocks=NULL,
 									line_style=c("combined", "split"),
-									plotter=c("ggrba", "ggplot"),
+									plotter=NULL,
 									title=NULL,
 									cumulate=FALSE,
 									baseline_name="Baseline",
 									baseline_colour="royalblue",
-									collapse_baseline=TRUE) {
-	plotter <- match.arg(plotter)
+									collapse_baseline=TRUE,
+									date_range=NULL) {
+	plotter <- ezdyn_resolve_plotter(plotter)
 	is_alt_path <- ezdyn_is_alt_path(df)
 	if (is_alt_path) {
 		df <- ezdyn_prepare_alt_path_data(df, baseline_name, collapse_baseline)
@@ -440,7 +522,8 @@ plot_pretty <- function(df,
 		plotter=plotter,
 		custom_title=title,
 		baseline_name=baseline_name,
-		baseline_colour=baseline_colour
+		baseline_colour=baseline_colour,
+		date_range=date_range
 	)
 	graph_data <- if (is_alt_path) {
 		df |>
@@ -463,7 +546,7 @@ plot_pretty_irf <- function(df,
 								display_names=NULL,
 								shocks=NULL,
 								line_style=c("combined", "split"),
-								plotter=c("ggrba", "ggplot"),
+								plotter=NULL,
 								title=NULL,
 								cumulate=FALSE,
 								baseline_name="Baseline",

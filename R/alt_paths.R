@@ -65,7 +65,7 @@ ezdyn_normalize_alt_paths <- function(alt_paths, forecast_dates) {
 ezdyn_validate_get_alt_paths <- function(alt_paths, models, baseline, use_cd,
                                          lambda, instrument_display_name,
                                          instrument_shock_name, forecast_start,
-                                         forecast_end, data_start) {
+                                         forecast_end, data_start, cache) {
   # 1. Validate model, timeline, and solver inputs.
   ezdyn_validate_baseline_models(models)
   forecast_start <- ezdyn_alt_path_date(forecast_start, "forecast_start")
@@ -80,6 +80,9 @@ ezdyn_validate_get_alt_paths <- function(alt_paths, models, baseline, use_cd,
   }
   if (!is.logical(use_cd) || length(use_cd) != 1 || is.na(use_cd)) {
     stop("`use_cd` must be one logical value.", call. = FALSE)
+  }
+  if (!is.logical(cache) || length(cache) != 1 || is.na(cache)) {
+    stop("`cache` must be one logical value.", call. = FALSE)
   }
   if (!is.numeric(lambda) || length(lambda) != 1 || is.na(lambda) || lambda < 0 || lambda > 1) {
     stop("`lambda` must be one numeric value in [0, 1].", call. = FALSE)
@@ -122,7 +125,8 @@ ezdyn_validate_get_alt_paths <- function(alt_paths, models, baseline, use_cd,
     instrument_display_name = instrument_display_name,
     instrument_shock_name = instrument_shock_name,
     forecast_dates = forecast_dates,
-    output_dates = output_dates
+    output_dates = output_dates,
+    cache = cache
   )
 }
 
@@ -148,6 +152,7 @@ ezdyn_alt_path_shared_baseline <- function(baseline_levels, response_metadata) {
       unit_symbol_baseline,
       path_name = "Baseline",
       model_name = NA_character_,
+      model_colour = NA_character_,
       value = baseline_value,
       effective_use_cd = NA
     )
@@ -166,18 +171,26 @@ ezdyn_alt_path_response_metadata <- function(irf) {
     )
 }
 
+# Summarise, once per `get_alt_paths()` call, which display names have any
+# missing baseline value. This is invariant across models and alternative
+# paths, so callers must compute it once from `baseline_levels` rather than
+# have `ezdyn_alt_path_usable_metadata()` repeat this group-by/summarise for
+# every path - a real cost when `baseline_levels` spans the full baseline
+# history for every display name.
+ezdyn_alt_path_baseline_completeness <- function(baseline_levels) {
+  baseline_levels |>
+    dplyr::group_by(display_name) |>
+    dplyr::summarise(has_missing_value = any(is.na(baseline_value)), .groups = "drop")
+}
+
 # Keep pretty-IRF responses supported by complete canonical baseline levels.
-ezdyn_alt_path_usable_metadata <- function(response_metadata, baseline_levels, model_name) {
+ezdyn_alt_path_usable_metadata <- function(response_metadata, baseline_completeness, model_name) {
   # A missing baseline column means no level path was supplied for that response,
   # so it is outside this calculation's level-path output by construction.
   response_metadata <- response_metadata |>
-    dplyr::filter(display_name %in% baseline_levels$display_name)
+    dplyr::filter(display_name %in% baseline_completeness$display_name)
 
-  baseline_summary <- baseline_levels |>
-    dplyr::group_by(display_name) |>
-    dplyr::summarise(has_missing_value = any(is.na(baseline_value)), .groups = "drop")
-
-  incomplete_display_names <- baseline_summary |>
+  incomplete_display_names <- baseline_completeness |>
     dplyr::filter(has_missing_value) |>
     dplyr::pull(display_name) |>
     intersect(response_metadata$display_name)
@@ -223,9 +236,10 @@ ezdyn_alt_path_effective_cd <- function(model, model_name, use_cd, lambda,
 
 # Calculate every alternative scenario for one model in display-name level space.
 ezdyn_alt_path_model_paths <- function(alt_paths, model, model_name,
-                                       baseline_levels, instrument_display_name,
+                                       baseline_levels, baseline_completeness,
+                                       instrument_display_name,
                                        shock_code, effective_use_cd, lambda,
-                                       forecast_dates) {
+                                       forecast_dates, cache) {
   # 1. Get the instrument's level baseline, which is the only baseline series
   #    needed to construct the targeted path deviations.
   instrument_baseline <- baseline_levels |>
@@ -236,7 +250,9 @@ ezdyn_alt_path_model_paths <- function(alt_paths, model, model_name,
     stop(sprintf("Model `%s` is missing forecast baseline values for instrument `%s`.", model_name, instrument_display_name), call. = FALSE)
   }
 
-  alt_paths |>
+  # 2. Compute a pretty targeted IRF per path. It is the authoritative source
+  #    of model-specific names, units, symbols, and output `dynare_name`.
+  paths <- alt_paths |>
     tidyr::pivot_longer(-date, names_to = "path_name", values_to = "target_value") |>
     dplyr::left_join(
       instrument_baseline |>
@@ -244,38 +260,48 @@ ezdyn_alt_path_model_paths <- function(alt_paths, model, model_name,
       by = "date"
     ) |>
     dplyr::mutate(deviation = target_value - baseline_value) |>
-    dplyr::group_split(path_name) |>
-    purrr::map_dfr(function(path) {
-      path_name <- unique(path$path_name)
-      target <- stats::setNames(list(path$deviation), instrument_display_name)
-      shock_timing <- stats::setNames(list(seq_along(forecast_dates)), shock_code)
+    dplyr::group_split(path_name)
 
-      # 2. Compute a pretty targeted IRF. It is the authoritative source of
-      #    model-specific names, units, symbols, and output `dynare_name`.
-      irf <- if (effective_use_cd) {
-        get_irf_target_gabaix(
-          model$M_, model$oo_, length(forecast_dates), target, shock_timing,
-          lambda, pretty = TRUE, shock_nickname = path_name
-        )
-      } else {
-        get_irf_target(
-          model$M_, model$oo_, length(forecast_dates), target, shock_timing,
-          pretty = TRUE, shock_nickname = path_name
-        )
-      }
+  compute_path_irf <- function(path) {
+    path_name <- unique(path$path_name)
+    target <- stats::setNames(list(path$deviation), instrument_display_name)
+    shock_timing <- stats::setNames(list(seq_along(forecast_dates)), shock_code)
 
-      # 3. Exclude response variables without complete canonical baseline
-      #    levels, then join deviations to levels by date and display name only.
-      response_metadata <- ezdyn_alt_path_response_metadata(irf)
-      usable_metadata <- ezdyn_alt_path_usable_metadata(
-        response_metadata,
-        baseline_levels,
-        model_name
+    if (effective_use_cd) {
+      get_irf_target_gabaix(
+        model$M_, model$oo_, length(forecast_dates), target, shock_timing,
+        lambda, pretty = TRUE, shock_nickname = path_name, cache = cache
       )
-      if (!(instrument_display_name %in% usable_metadata$display_name)) {
-        stop(sprintf("Model `%s` is missing forecast baseline values for instrument `%s`.", model_name, instrument_display_name), call. = FALSE)
-      }
+    } else {
+      get_irf_target(
+        model$M_, model$oo_, length(forecast_dates), target, shock_timing,
+        pretty = TRUE, shock_nickname = path_name, cache = cache
+      )
+    }
+  }
+  irfs <- purrr::map(paths, compute_path_irf)
 
+  # 3. Exclude response variables without complete canonical baseline levels.
+  #    The usable response set is a fixed property of this model's declared
+  #    responses and the shared baseline's completeness - not of any one
+  #    path's target values - so compute and join it once here rather than
+  #    repeating an identical baseline join for every path.
+  response_metadata <- ezdyn_alt_path_response_metadata(irfs[[1]])
+  usable_metadata <- ezdyn_alt_path_usable_metadata(
+    response_metadata,
+    baseline_completeness,
+    model_name
+  )
+  if (!(instrument_display_name %in% usable_metadata$display_name)) {
+    stop(sprintf("Model `%s` is missing forecast baseline values for instrument `%s`.", model_name, instrument_display_name), call. = FALSE)
+  }
+  baseline_levels_for_model <- baseline_levels |>
+    dplyr::inner_join(usable_metadata, by = "display_name")
+
+  purrr::map2_dfr(paths, irfs, function(path, irf) {
+      path_name <- unique(path$path_name)
+
+      # 4. Join deviations to levels by date and display name only.
       irf_levels <- irf |>
         dplyr::mutate(date = forecast_dates[t]) |>
         dplyr::inner_join(
@@ -290,12 +316,12 @@ ezdyn_alt_path_model_paths <- function(alt_paths, model, model_name,
         ) |>
         dplyr::select(date, display_name, irf_value = value)
 
-      baseline_levels |>
-        dplyr::inner_join(usable_metadata, by = "display_name") |>
+      baseline_levels_for_model |>
         dplyr::left_join(irf_levels, by = c("date", "display_name")) |>
         dplyr::mutate(
           path_name = path_name,
           model_name = model_name,
+          model_colour = if (is.null(model$M_$model_colour)) NA_character_ else model$M_$model_colour,
           value = dplyr::coalesce(baseline_value + irf_value, baseline_value),
           effective_use_cd = effective_use_cd
         ) |>
@@ -308,6 +334,7 @@ ezdyn_alt_path_model_paths <- function(alt_paths, model, model_name,
           unit_symbol_baseline,
           path_name,
           model_name,
+          model_colour,
           value,
           effective_use_cd
         )
@@ -315,7 +342,7 @@ ezdyn_alt_path_model_paths <- function(alt_paths, model, model_name,
 }
 
 # Resolve one model's instrument and run its complete alternative-path calculation.
-ezdyn_alt_path_model_result <- function(inputs, model, model_name, baseline_levels) {
+ezdyn_alt_path_model_result <- function(inputs, model, model_name, baseline_levels, baseline_completeness) {
   # 1. Resolve the named instrument separately for each model.
     instrument_code <- ezdyn_resolve_variable_names(
     inputs$instrument_display_name,
@@ -352,11 +379,13 @@ ezdyn_alt_path_model_result <- function(inputs, model, model_name, baseline_leve
     model,
     model_name,
     baseline_levels,
+    baseline_completeness,
     instrument_display_name,
     shock_code,
     effective_use_cd,
     inputs$lambda,
-    inputs$forecast_dates
+    inputs$forecast_dates,
+    inputs$cache
   )
 }
 
@@ -378,12 +407,14 @@ ezdyn_alt_path_model_result <- function(inputs, model, model_name, baseline_leve
 #' @param forecast_start First forecast quarter.
 #' @param forecast_end Last forecast quarter.
 #' @param data_start First baseline quarter returned.
+#' @param cache Logical. If `TRUE` (default), read/write underlying IRFs
+#'   from/to each model's `oo_$.irf_cache` (see `ezdyn_irf_cache()`).
 #'
 #' @return Pretty tibble containing the shared baseline and model-specific paths.
 #' @export
 get_alt_paths <- function(alt_paths, models, baseline, use_cd = FALSE, lambda = 0,
                           instrument_display_name = "Cash Rate", instrument_shock_name = "Monetary policy shock",
-                          forecast_start, forecast_end, data_start) {
+                          forecast_start, forecast_end, data_start, cache = TRUE) {
   inputs <- ezdyn_validate_get_alt_paths(
     alt_paths = alt_paths,
     models = models,
@@ -394,14 +425,17 @@ get_alt_paths <- function(alt_paths, models, baseline, use_cd = FALSE, lambda = 
     instrument_shock_name = instrument_shock_name,
     forecast_start = forecast_start,
     forecast_end = forecast_end,
-    data_start = data_start
+    data_start = data_start,
+    cache = cache
   )
 
-  # 1. Convert the canonical baseline to levels keyed only by date/display name.
+  # 1. Convert the canonical baseline to levels keyed only by date/display name,
+  #    and summarise its completeness once for every model and path to reuse.
   baseline_levels <- ezdyn_alt_path_baseline_levels(
     inputs$baseline,
     inputs$output_dates
   )
+  baseline_completeness <- ezdyn_alt_path_baseline_completeness(baseline_levels)
 
   # 2. Calculate every scenario for every model. Pretty IRFs provide metadata.
   alternatives <- purrr::imap_dfr(inputs$models, function(model, model_name) {
@@ -409,7 +443,8 @@ get_alt_paths <- function(alt_paths, models, baseline, use_cd = FALSE, lambda = 
       inputs,
       model,
       model_name,
-      baseline_levels
+      baseline_levels,
+      baseline_completeness
     )
   })
 
@@ -442,13 +477,15 @@ get_alt_paths <- function(alt_paths, models, baseline, use_cd = FALSE, lambda = 
 #' @param plot_model Model label to plot.
 #' @param plot_start_date First plotting date.
 #' @param plot_end_date Last plotting date.
-#' @param plotter Plotting backend. `"ggrba"` (default) or optional `"ggplot"`.
+#' @param plotter Plotting backend, `"ggrba"` or `"ggplot"`. `NULL` (default)
+#'   uses `"ggrba"` when the optional ggrba package is installed, otherwise
+#'   falls back to `"ggplot"`.
 #'
 #' @return List with `graph`, `graph_data`, and `graph_fname`.
 #' @export
 plot_alt_paths <- function(df_raw, plot_variables, agg_ye = FALSE,
                            incl_baseline = TRUE, plot_model = "DINGO",
-                           plot_start_date, plot_end_date, plotter="ggrba") {
+                           plot_start_date, plot_end_date, plotter=NULL) {
   # 1. Retain the legacy model/date selection before using the shared plotter.
   df <- df_raw |>
     dplyr::filter(model_name == plot_model | path_name == "Baseline") |>
@@ -486,181 +523,14 @@ plot_alt_paths <- function(df_raw, plot_variables, agg_ye = FALSE,
   )
 }
 
-# Helper functions ----
-# TODO: Consider relocation.
-#' Calculate year-ended growth from quarterly growths.
-QGROWTH_TO_YE <- function(x) {(1+x/100)*(1+dplyr::lag(x)/100)*(1+dplyr::lag(x,2)/100)*(1+dplyr::lag(x,3)/100)*100-100}
-
-# Convert quarterly growth to year-ended growth where four consecutive quarters exist.
-# TODO: Clean up. 
-ezdyn_alt_path_ye_values <- function(date, value) {
-  tibble::tibble(date = date, value = value) |>
-    dplyr::mutate(
-      previous_date_1 = dplyr::lag(date),
-      previous_date_2 = dplyr::lag(date, 2),
-      previous_date_3 = dplyr::lag(date, 3),
-      previous_value_1 = dplyr::lag(value),
-      previous_value_2 = dplyr::lag(value, 2),
-      previous_value_3 = dplyr::lag(value, 3),
-      has_four_quarters =
-        !is.na(value) & !is.na(previous_value_1) &
-        !is.na(previous_value_2) & !is.na(previous_value_3) &
-        previous_date_1 == lubridate::`%m-%`(date, lubridate::period(month = 3)) &
-        previous_date_2 == lubridate::`%m-%`(date, lubridate::period(month = 6)) &
-        previous_date_3 == lubridate::`%m-%`(date, lubridate::period(month = 9)),
-      value = dplyr::if_else(
-        has_four_quarters,
-        (1 + value / 100) * (1 + previous_value_1 / 100) *
-          (1 + previous_value_2 / 100) * (1 + previous_value_3 / 100) * 100 - 100,
-        NA_real_,
-        missing = NA_real_
-      )
-    ) |>
-    dplyr::pull(value)
-}
-
-# Validate input and identify the alternative responses to transform.
-ezdyn_validate_alt_paths_ye <- function(pretty_df, output_ye_vars, forecast_start) {
-  required_columns <- c(
-    "date", "dynare_name", "display_name", "display_unit", "path_name",
-    "model_name", "value"
-  )
-  if (!is.data.frame(pretty_df) || !all(required_columns %in% names(pretty_df))) {
-    stop("`pretty_df` must be a data frame returned by `get_alt_paths()`.", call. = FALSE)
-  }
-
-  pretty_df <- tibble::as_tibble(pretty_df)
-  if (!inherits(pretty_df$date, "Date") || anyNA(pretty_df$date) || !is.numeric(pretty_df$value)) {
-    stop("`pretty_df` must contain non-missing Date values and numeric `value` values.", call. = FALSE)
-  }
-  ezdyn_alt_path_date(forecast_start, "forecast_start")
-
-  available_vars <- pretty_df |>
-    dplyr::filter(path_name != "Baseline", !is.na(dynare_name)) |>
-    dplyr::pull(dynare_name) |>
-    unique()
-  if (length(available_vars) == 0) {
-    stop("`pretty_df` must contain at least one alternative response.", call. = FALSE)
-  }
-
-  transform_all <- length(output_ye_vars) == 1 && is.na(output_ye_vars)
-  if (!transform_all &&
-      (!is.character(output_ye_vars) || length(output_ye_vars) == 0 || anyNA(output_ye_vars))) {
-    stop("`output_ye_vars` must be `NA` or a non-empty character vector of Dynare names.", call. = FALSE)
-  }
-
-  selected_vars <- if (transform_all) available_vars else unique(output_ye_vars)
-  unknown_vars <- setdiff(selected_vars, available_vars)
-  if (length(unknown_vars) > 0) {
-    stop(
-      sprintf("Unknown `output_ye_vars`: %s.", paste(sprintf("`%s`", unknown_vars), collapse = ", ")),
-      call. = FALSE
-    )
-  }
-
-  selected_display_names <- pretty_df |>
-    dplyr::filter(path_name != "Baseline", dynare_name %in% selected_vars) |>
-    dplyr::pull(display_name) |>
-    unique()
-
-  list(
-    pretty_df = pretty_df,
-    selected_vars = selected_vars,
-    selected_display_names = selected_display_names
-  )
-}
-
-# Apply year-ended labels without duplicating an existing suffix.
-ezdyn_alt_path_ye_labels <- function(path) {
-  path |>
-    dplyr::mutate(
-      display_unit = "Year-ended",
-      display_name = dplyr::if_else(
-        is.na(display_name) | grepl(" \\(YE\\)$", display_name),
-        display_name,
-        paste0(display_name, " (YE)")
-      )
-    )
-}
-
-#' Convert selected quarterly alternative paths to year-ended rates.
-#'
-#' Transforms only the requested alternative `dynare_name` values. Their shared
-#' Baseline rows are transformed by `display_name`; all other rows are retained
-#' unchanged. Values are calculated only where four consecutive quarters exist.
-#'
-#' @param pretty_df Output pretty data frame from [get_alt_paths()].
-#' @param output_ye_vars Optional character vector of variable names in
-#'   `dynare_name` format to transform. If `NA` (default), all variables are
-#'   transformed.
-#' @param forecast_start First forecast date. It is validated for compatibility
-#'   with the alternative-path API.
-#'
-#' @return A pretty data frame with the same rows and columns as `pretty_df`.
-#'   Selected rows have year-ended values, `display_unit = "Year-ended"`, and a
-#'   ` (YE)` display-name suffix. Initial rows without four quarters remain `NA`.
-#' @export
-get_alt_paths_ye <- function(pretty_df, output_ye_vars = NA, forecast_start) {
-  inputs <- ezdyn_validate_alt_paths_ye(pretty_df, output_ye_vars, forecast_start)
-  pretty_df <- inputs$pretty_df |>
-    dplyr::mutate(ezdyn_row_order = dplyr::row_number())
-
-  # 1. Transform one shared Baseline series for every selected display name.
-  baseline_ye <- pretty_df |>
-    dplyr::filter(
-      path_name == "Baseline",
-      display_name %in% inputs$selected_display_names
-    ) |>
-    dplyr::group_split(display_name) |>
-    purrr::map_dfr(function(path) {
-      path |>
-        dplyr::arrange(date) |>
-        dplyr::mutate(value = ezdyn_alt_path_ye_values(date, value)) |>
-        ezdyn_alt_path_ye_labels()
-    })
-
-  # 2. Transform each alternative with only its matching prior Baseline history.
-  alternative_ye <- pretty_df |>
-    dplyr::filter(path_name != "Baseline", dynare_name %in% inputs$selected_vars) |>
-    dplyr::group_split(model_name, dynare_name, display_name, path_name) |>
-    purrr::map_dfr(function(path) {
-      current_display_name <- unique(path$display_name)
-      path_start <- min(path$date)
-      baseline_history <- pretty_df |>
-        dplyr::filter(
-          path_name == "Baseline",
-          display_name == current_display_name,
-          date < path_start
-        ) |>
-        dplyr::mutate(ezdyn_is_alternative = FALSE)
-
-      dplyr::bind_rows(
-        baseline_history,
-        path |>
-          dplyr::mutate(ezdyn_is_alternative = TRUE)
-      ) |>
-        dplyr::arrange(date) |>
-        dplyr::mutate(value = ezdyn_alt_path_ye_values(date, value)) |>
-        dplyr::filter(ezdyn_is_alternative) |>
-        dplyr::select(-ezdyn_is_alternative) |>
-        ezdyn_alt_path_ye_labels()
-    })
-
-  # 3. Bind transformed rows back to untouched rows in their original order.
-  transformed <- dplyr::bind_rows(baseline_ye, alternative_ye)
-  untouched <- pretty_df |>
-    dplyr::filter(!(ezdyn_row_order %in% transformed$ezdyn_row_order))
-
-  dplyr::bind_rows(untouched, transformed) |>
-    dplyr::arrange(ezdyn_row_order) |>
-    dplyr::select(-ezdyn_row_order)
-
-}
-
 #' Prepare alternative paths output as a wide table
 #'
-#' @param pretty_df Output pretty data frame from get_alt_paths() or
-#'   get_alt_paths_ye().
+#' @param pretty_df Output pretty data frame from [get_alt_paths()]. A
+#'   year-ended variable (e.g. `infl_obs_ye`) is an ordinary metadata-declared
+#'   derived variable, resolved automatically like any other response.
+#' @param output_vars Optional vector or list of variable names in
+#'   `dynare_name` format to keep in the output. If `NA` (default), all
+#'   variables are included.
 #' @param output_vars Optional vector or list of variable names in
 #'   `dynare_name` format to keep in the output. If `NA` (default), all
 #'   variables are included.

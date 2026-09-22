@@ -56,6 +56,27 @@ resolve_first_field <- function(x, candidates) {
 }
 
 
+#' Check whether an `oo_` object has historical shock decomposition data.
+#'
+#' `get_hd()` requires Dynare's smoothed shocks/variables
+#' (`oo_$SmoothedShocks`/`oo_$SmoothedVariables`), which are only populated
+#' for estimated/smoothed models - calibrated-only Dynare models and
+#' `custom_moo()` IRF-only pairs never have these fields.
+#'
+#' This is necessary but not sufficient for `get_hd()` to fully succeed: it
+#' also reads `oo_$dr$ghx`/`ghu`/`order_var`/`inv_order_var`/`kstate` and
+#' `M_$maximum_lag`, which are not checked here. Tighten this check to also
+#' require `oo_$dr` once the A/B (`ghx`/`ghu`) decision-rule matrices are
+#' cached directly on the model object, making that check cheap.
+#'
+#' @param oo_ Dynare output structure.
+#'
+#' @return Single logical.
+hsd_data_available <- function(oo_) {
+	is.list(oo_$SmoothedShocks) && length(oo_$SmoothedShocks) > 0 &&
+		is.list(oo_$SmoothedVariables) && length(oo_$SmoothedVariables) > 0
+}
+
 #' Historical shock decomposition from Dynare smoothed objects.
 #'
 #' Reimplementation of MATLAB `getHD.m`.
@@ -78,6 +99,16 @@ resolve_first_field <- function(x, candidates) {
 get_hd <- function(M_, oo_, varlist = NULL, nvar_unobs = 0L, i_var_unobs = integer()) {
 	# `varlist` is currently unused in the MATLAB source and retained for compatibility.
 	force(varlist)
+
+	if (!hsd_data_available(oo_)) {
+		stop(
+			sprintf(
+				"Model `%s` has no historical shock decomposition data (`SmoothedShocks`/`SmoothedVariables` not found in `oo_`) - historical shock decomposition requires an estimated/smoothed model.",
+				if (!is.null(M_$model_name)) M_$model_name else "unnamed"
+			),
+			call. = FALSE
+		)
+	}
 
 	# Useful definitions
 	endo_nbr <- M_$endo_nbr

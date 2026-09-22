@@ -136,7 +136,7 @@ plot_pretty_hd <- function(df,
 		ggplot2::labs(x = "Quarter", y = NULL, fill = "Shock",
 		              caption= "'Other' includes any shocks not part of the grouping,
 		              'Residual' contains approximation error from initial conditions.") +
-		ggplot2::theme_minimal()
+		ggplot2::theme_classic(base_size = 11 * 1.25)
 
 
 	response_vars <- unique(stats::na.omit(df$display_name))

@@ -21,6 +21,8 @@
 #'    is not usable and so an error is thrown; use `scale_targets=FALSE` to
 #'    supply targets directly in model units. If FALSE, targets should be provided in
 #'    'unscaled' units (i.e. the units used in the dynare object or input IRF).
+#' @param cache Logical. If `TRUE`, read/write the underlying IRF from/to
+#'   `oo_$.irf_cache` (see `ezdyn_irf_cache()`).
 #'
 #' @return An MxH matrix (response vars x horizon) or pretty data frame when
 #'   `pretty=TRUE` (includes `gabaix_lambda`).
@@ -34,7 +36,7 @@
 #' }
 #'
 get_irf_target_gabaix <- function(M_, oo_, horizon,
-                                  target, shock_timing, lambda, pretty=FALSE, shock_nickname="", scale_targets=TRUE) {
+                                  target, shock_timing, lambda, pretty=FALSE, shock_nickname="", scale_targets=TRUE, cache=FALSE) {
     target <- ezdyn_resolve_target_names(target, M_) |>
         ezdyn_descale_targets(M_, scale_targets=scale_targets)
     shock_timing <- ezdyn_resolve_shock_timing_names(shock_timing, M_)
@@ -50,7 +52,7 @@ get_irf_target_gabaix <- function(M_, oo_, horizon,
     T_shock <- max(unlist(shock_timing))
     shock_name <- names(shock_timing)
 
-    Mh <- get_ir_matrix_gabaix(M_, oo_, T_, shock_name, T_shock,lambda)
+    Mh <- get_ir_matrix_gabaix(M_, oo_, T_, shock_name, T_shock, lambda, cache = cache)
 
     Mh_total <- Mh$Mh_total[drop=F,,,,unlist(shock_timing)]
     Mh_marginal <- Mh$Mh_marginal[drop=F,,,unlist(shock_timing),]

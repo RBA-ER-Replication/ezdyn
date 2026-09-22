@@ -1,43 +1,52 @@
 Type: Package
 Package: ezdyn
-Title: Tools for Performing Analysis with Linear Dynamic Models Fast
-Version: 0.2
-Authors@R: 
-    person("Hamish", "Sullivan", , , role = c("aut", "cre"))
+Title: Tools for Performing Analysis of Linear Dynamic Models Fast
+Version: 0.3.7
+Authors@R: c( 
+    person("Hamish", "Sullivan", , "sullivanh@rba.gov.au", role = c("aut", "cre")),
+    person("Callum", "Ryan", , "ryanca@rba.gov.au", role = c("ctr"))
+    )
 Description: Operationalise and dashboard linear dynamic models (and
     models from dynare).
 License: BSD_3_clause + file LICENSE
 Depends:
     R (>= 4.1.0)
 Imports: 
+    bsicons,
+    bslib,
     dplyr,
+    DT,
     expm,
     ggplot2,
     grDevices,
     grid,
+    htmltools,
     jsonlite,
     kableExtra,
     katex,
     knitr,
     lubridate,
     openxlsx2,
+    plotly,
     purrr,
+    quadprog,
     R.matlab,
     readxl,
     rlang,
     scales,
+    shiny,
+    shinyWidgets,
     stats,
     stringr,
     tibble,
     tidyr,
     tools,
+    writexl,
     zoo
 Suggests: 
     ggrba,
     pkgload,
-    plotly,
-    testthat (>= 3.0.0),
-    writexl
+    testthat (>= 3.0.0)
 Config/testthat/edition: 3
 Encoding: UTF-8
 LazyData: true

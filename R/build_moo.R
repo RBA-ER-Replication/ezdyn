@@ -20,6 +20,17 @@ rename_meta <- function(varmeta) {
       dynare_name = dplyr::coalesce(rename_to, dynare_name)
     )
 }
+
+# Validate an optional single-colour value used for one model's plot lines.
+ezdyn_validate_model_colour <- function(colour) {
+  if (is.null(colour)) {
+    return(invisible(NULL))
+  }
+  if (!is.character(colour) || length(colour) != 1 || is.na(colour) || colour == "") {
+    stop("`colour` must be NULL or one non-empty colour value.", call. = FALSE)
+  }
+  invisible(colour)
+}
 #' Build Moo objects for a non-Dynare model, by supplying IRFs and any applicable metadata.
 #'
 #' @param irf A long data frame with columns `t` (time), `resp_var` (response variable), `shock` (shock variable), and `value` (IRF value).
@@ -31,6 +42,9 @@ rename_meta <- function(varmeta) {
 #' @param param_df One-row data frame of model parameters used to
 #'   evaluate scaling formulas. Default is an empty dataframe.
 #' @param subset_vars Boolean. if TRUE, clear the IRF dataframe of all variables not in subset_vars.
+#' @param colour Optional colour used for this model's lines in [plot_pretty()]/
+#'   [plot_pretty_graph()] (e.g. alternative-path or optimal-policy comparisons).
+#'   `NULL` (default) leaves the model in the automatic dynamic palette.
 #'
 #' @return A full MOO pair of class `custom_moo`, containing `M_` and `oo_`.
 #' @export
@@ -38,7 +52,8 @@ rename_meta <- function(varmeta) {
 #' \dontrun{
 #' moo <- custom_moo(irf_df, model_name = "MyModel", meta = "meta.xlsx")
 #' }
-custom_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), subset_vars=FALSE) {
+custom_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), subset_vars=FALSE, colour=NULL) {
+    ezdyn_validate_model_colour(colour)
     M_ <- list()
     if (!is.null(meta)) {
         sheets <- readxl::excel_sheets(meta)
@@ -52,6 +67,7 @@ custom_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), s
         varmeta <- rename_meta(varmeta)
     }
     M_$model_name <- model_name
+    M_$model_colour <- colour
     M_$endo.vars <- unique(irf$resp_var)
     M_$exo.vars <- unique(irf$shock)
     M_$param_df <- param_df
@@ -60,15 +76,15 @@ custom_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), s
     if (!is.null(meta)) {
       M_$varmeta <- varmeta |>
           #Calculate scaling factors for each variable using latest parameters.
-          calc_scale_factors(M_)
-      ezdyn_validate_var_alias_metadata(M_$varmeta)
+          calc_scale_factors(M_) |>
+          ezdyn_validate_var_alias_metadata()
       if ("shocks" %in% sheets) {
         shock_meta <- readxl::read_excel(meta, sheet = "shocks")
-        ezdyn_validate_shock_alias_metadata(shock_meta)
-        M_$shock_meta <- shock_meta
+        M_$shock_meta <- ezdyn_validate_shock_alias_metadata(shock_meta)
       }
     }
     oo_ <- list()
+    oo_$.irf_cache <- new.env(parent = emptyenv()) # Backing store for get_ir_matrix()/get_ir_matrix_gabaix() caching.
     if (subset_vars) {
         irf <- irf |>
         dplyr::filter(resp_var %in% M_$varmeta$dynare_name)
@@ -90,12 +106,13 @@ custom_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), s
 #' @inheritParams custom_moo
 #' @return A full MOO pair of class `custom_moo`, containing `M_` and `oo_`.
 #' @export
-read_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), subset_vars=FALSE) {
+read_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), subset_vars=FALSE, colour=NULL) {
   custom_moo(
     irf = irf,
     model_name = model_name,
     meta = meta,
     param_df = param_df,
-    subset_vars = subset_vars
+    subset_vars = subset_vars,
+    colour = colour
   )
 }

@@ -38,6 +38,9 @@ repack <- function(obj) {
 #'   `dynare_name`, `display_name`, `units`, `unit_symbol`, and `scale_formula`.
 #' Can include additional columns if you like as well.
 #' @param model_name Optional model name.
+#' @param colour Optional colour used for this model's lines in [plot_pretty()]/
+#'   [plot_pretty_graph()] (e.g. alternative-path or optimal-policy comparisons).
+#'   `NULL` (default) leaves the model in the automatic dynamic palette.
 #'
 #' @return A full MOO pair of class `dynare`, containing `oo_` and `M_`.
 #' @export
@@ -45,7 +48,8 @@ repack <- function(obj) {
 #' \dontrun{
 #' read_dynare("solved_model.json", "varmeta.xlsx", model_name = "DINGO")
 #' }
-read_dynare <- function(path, path_meta=NULL, model_name=NULL) {
+read_dynare <- function(path, path_meta=NULL, model_name=NULL, colour=NULL) {
+    ezdyn_validate_model_colour(colour)
     file_ext <- tools::file_ext(path)
     if (file_ext == "json") {
         solved_model <- readLines(path) |>
@@ -92,17 +96,17 @@ read_dynare <- function(path, path_meta=NULL, model_name=NULL) {
                 dplyr::mutate(scale_formula = as.character(scale_formula)) |>
                 #Calculate scaling factors for each variable using latest parameters.
                 calc_scale_factors(M_)
-        ezdyn_validate_var_alias_metadata(varmeta)
-        M_$varmeta <- varmeta
+        M_$varmeta <- ezdyn_validate_var_alias_metadata(varmeta)
         # If shock metadata is provided, load this into the object too.
         if ("shocks" %in% sheets) {
             shock_meta <- readxl::read_excel(path_meta, sheet = "shocks")
-            ezdyn_validate_shock_alias_metadata(shock_meta)
-            M_$shock_meta <- shock_meta
+            M_$shock_meta <- ezdyn_validate_shock_alias_metadata(shock_meta)
         }
     }
 
     M_$model_name <- model_name
+    M_$model_colour <- colour
+    oo_$.irf_cache <- new.env(parent = emptyenv()) # Backing store for get_ir_matrix()/get_ir_matrix_gabaix() caching.
     class(M_) <-"dynare" # Specify the type of the M_ object as dynare, as opposed to
     class(oo_) <-"dynare"
 

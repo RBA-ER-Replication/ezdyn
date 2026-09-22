@@ -20,6 +20,8 @@
 #'    is not usable and so an error is thrown; use `scale_targets=FALSE` to
 #'    supply targets directly in model units. If FALSE, targets should be provided in
 #'    'unscaled' units (i.e. the units used in the dynare object or input IRF).
+#' @param cache Logical. If `TRUE`, read/write the underlying IRF from/to
+#'   `oo_$.irf_cache` (see `ezdyn_irf_cache()`).
 #'
 #' @return An MxH matrix (response vars x horizon) or pretty data frame when
 #'   `pretty=TRUE`.
@@ -34,7 +36,7 @@
 #' get_irf_target(M_, oo_, 12, list("Cash Rate" = rep(0.1, 6)), list("Cash rate shock" = 1:6))
 #' get_irf_target(M_, oo_, 12, list(r_obs = rep(0.001, 6)), list(eps_r = 1:6), scale_targets=FALSE)
 #' }
-get_irf_target <- function(M_, oo_, horizon, target, shock_timing, pretty=FALSE, shock_nickname="", scale_targets=TRUE) {
+get_irf_target <- function(M_, oo_, horizon, target, shock_timing, pretty=FALSE, shock_nickname="", scale_targets=TRUE, cache=FALSE) {
     # If target names are in display names, resolve to dynare names. 
     # Then if target variable has a scaling in the metadata, and scale_targets=TRUE,
     # descale targets so that they are in the units of the underlying variables in the oo_ object. 
@@ -47,7 +49,7 @@ get_irf_target <- function(M_, oo_, horizon, target, shock_timing, pretty=FALSE,
         nrow()
     T_ <- max(c(t_max_target, horizon))
     # Get impulse responses to every shock that occurs.
-    Mh <- get_ir_matrix(M_, oo_, T_, shock_timing)
+    Mh <- get_ir_matrix(M_, oo_, T_, shock_timing, cache = cache)
     
     # Flatten the target matrix so that each row is a response variable for a 
     # particular time period.

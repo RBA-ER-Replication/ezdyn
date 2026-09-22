@@ -114,12 +114,11 @@ get_irf_custom <- function(M_, oo_, shock_names, horizon, data_frame=FALSE) {
 #' @param data_frame Logical. If TRUE, return a data frame instead of an array.
 #' @keywords internal
 get_irf_dynare <- function(M_, oo_, shock_names, horizon, data_frame=FALSE) {
+    # Get decision rule matrices
+    dr <- get_dr_matrices(M_, oo_)
+    A <- dr$A
+    B <- dr$B
     get_irf_for_single_shock <- function(shock_name) {
-        # Get decision rule matrices
-        dr <- get_dr_matrices(M_, oo_)
-        A <- dr$A
-        B <- dr$B
-        
         # Subset B so that it only contains the variables being shocked.
         B_subset <- B[,shock_name]
         

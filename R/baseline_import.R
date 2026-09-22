@@ -408,6 +408,35 @@ translate_baseline <- function(baseline, source_model) {
 
 # Exported Function ----
 
+# Add metadata-declared derived display-name columns to a translated
+# (display-name-keyed) baseline, computed from the source model's own raw
+# source column already present under its display name. Mirrors
+# `augment_derived_variables()` (dynare-name-keyed, used for model-code
+# baselines), including applying the derived variable's own `scale_factor` on
+# top of its transform, but resolves both the derived variable and its source
+# to their default display name first, since a translated baseline is
+# display-name-keyed.
+ezdyn_augment_derived_baseline <- function(baseline, source_model) {
+  source_map <- ezdyn_baseline_source_map(source_model)
+  lookup <- ezdyn_derived_variable_lookup(source_model$M_$varmeta)
+  name_for <- stats::setNames(source_map$display_name, source_map$dynare_name)
+
+  for (variable in names(lookup)) {
+    target_display_name <- unname(name_for[variable])
+    if (is.na(target_display_name) || target_display_name %in% names(baseline)) next
+    derived <- lookup[[variable]]
+    source_display_name <- unname(name_for[derived$source])
+    if (is.na(source_display_name) || !(source_display_name %in% names(baseline))) next
+    value <- if (is.na(derived$transform)) {
+      baseline[[source_display_name]]
+    } else {
+      ezdyn_derived_transform_registry[[derived$transform]](baseline[[source_display_name]])
+    }
+    baseline[[target_display_name]] <- ezdyn_own_scale(source_model$M_$varmeta, variable)(value)
+  }
+  baseline
+}
+
 #' Import a canonical baseline for one or more models.
 #'
 #' Reads an `.xls`/`.xlsx` workbook or in-memory data frame, normalizes a
@@ -437,7 +466,8 @@ import_baseline <- function(input, source_model, models, date_col = NULL) {
   # 2. Normalize the raw table and translate it using the specified source model.
   baseline <- ezdyn_read_baseline_input(input) |>
     ezdyn_parse_baseline_dates(date_col = date_col) |>
-    translate_baseline(source_model = source_model)
+    translate_baseline(source_model = source_model) |>
+    ezdyn_augment_derived_baseline(source_model = source_model)
 
   # 3. Confirm that every shared display name has compatible target-model units.
   source_model_name <- ".source_model"

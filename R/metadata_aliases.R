@@ -8,9 +8,33 @@
 # Repeated rows for the same code/alias pair are allowed. Most existing ezdyn
 # code still assumes one effective metadata row per variable, so this validation
 # only protects the alias lookup added for display names and shock descriptions.
+# Cache key for the cleaned code/alias lookup built from one metadata table,
+# stored as an attribute so it survives being read back out of `M_$varmeta`/
+# `M_$shock_meta` across separate top-level calls within a session.
+ezdyn_alias_cache_attr <- function(code_col, alias_col) {
+    paste("ezdyn_alias_lookup", code_col, alias_col, sep = "|")
+}
+
+# Validate (once) that display aliases can be resolved unambiguously, then
+# cache the cleaned code/alias lookup as an attribute on the returned `meta`
+# so both repeat validation and alias resolution (`ezdyn_resolve_aliases()`)
+# can reuse it instead of repeating this dplyr pass on every call - important
+# because alias resolution runs once per alternative-path/policy calculation.
 ezdyn_validate_alias_metadata <- function(meta, code_col, alias_col, meta_name="metadata") {
-    if (is.null(meta) || !(code_col %in% names(meta)) || !(alias_col %in% names(meta))) {
-        return(invisible(TRUE))
+    cache_attr <- ezdyn_alias_cache_attr(code_col, alias_col)
+    has_columns <- !is.null(meta) && code_col %in% names(meta) && alias_col %in% names(meta)
+    cached <- if (has_columns) attr(meta, cache_attr, exact = TRUE) else NULL
+    # Trust the cache only if the code/alias column values are byte-for-byte
+    # identical to what was validated - e.g. `dplyr::mutate()` preserves this
+    # attribute even when it changes `meta`'s content, so presence alone isn't
+    # sufficient to prove the cached lookup still matches.
+    if (!is.null(cached) &&
+        identical(cached$code_values, meta[[code_col]]) &&
+        identical(cached$alias_values, meta[[alias_col]])) {
+        return(invisible(meta))
+    }
+    if (!has_columns) {
+        return(invisible(meta))
     }
     alias_df <- meta |>
         dplyr::select(dplyr::all_of(c(code_col, alias_col))) |>
@@ -22,7 +46,8 @@ ezdyn_validate_alias_metadata <- function(meta, code_col, alias_col, meta_name="
         dplyr::distinct()
 
     if (nrow(alias_df) == 0) {
-        return(invisible(TRUE))
+        attr(meta, cache_attr) <- list(alias_df = alias_df, code_values = meta[[code_col]], alias_values = meta[[alias_col]])
+        return(invisible(meta))
     }
 
     duplicate_aliases <- alias_df |>
@@ -59,7 +84,8 @@ ezdyn_validate_alias_metadata <- function(meta, code_col, alias_col, meta_name="
         ), call. = FALSE)
     }
 
-    invisible(TRUE)
+    attr(meta, cache_attr) <- list(alias_df = alias_df, code_values = meta[[code_col]], alias_values = meta[[alias_col]])
+    invisible(meta)
 }
 
 ezdyn_validate_var_alias_metadata <- function(varmeta) {
@@ -98,15 +124,8 @@ ezdyn_resolve_aliases <- function(values, M_, meta, code_col, alias_col, valid_c
     has_alias_meta <- !is.null(meta) && code_col %in% names(meta) && alias_col %in% names(meta)
     alias_df <- NULL
     if (has_alias_meta) {
-        ezdyn_validate_alias_metadata(meta, code_col, alias_col, input_name)
-        alias_df <- meta |>
-            dplyr::select(dplyr::all_of(c(code_col, alias_col))) |>
-            dplyr::mutate(
-                dplyr::across(dplyr::all_of(c(code_col, alias_col)), as.character)
-            ) |>
-            dplyr::filter(!is.na(.data[[code_col]]), .data[[code_col]] != "",
-                          !is.na(.data[[alias_col]]), .data[[alias_col]] != "") |>
-            dplyr::distinct()
+        meta <- ezdyn_validate_alias_metadata(meta, code_col, alias_col, input_name)
+        alias_df <- attr(meta, ezdyn_alias_cache_attr(code_col, alias_col), exact = TRUE)$alias_df
         valid_codes <- unique(c(valid_codes, alias_df[[code_col]]))
     }
 
@@ -166,6 +185,37 @@ ezdyn_resolve_shock_timing_names <- function(shock_timing, M_) {
     }
     names(shock_timing) <- ezdyn_resolve_shock_names(names(shock_timing), M_)
     shock_timing
+}
+
+# Resolve optimal-policy variable identifiers (display name or dynare code) to
+# dynare codes, permissively - unlike `ezdyn_resolve_variable_names()`, this
+# never errors on an unrecognised value (`valid_codes = NULL`), because policy
+# strategies also reference synthetic, non-model columns (e.g. `<var>_gap_loss`
+# loss-gap columns, or model-specific forecast assumptions) that have no
+# metadata row at all. A trailing `_gap_loss` suffix is stripped before
+# resolving the underlying variable and reattached afterwards, matching how
+# `get_ir_matrix()`'s `ezdyn_subset_irf_variables()` already treats it.
+ezdyn_resolve_policy_variable_names <- function(values, M_) {
+    values <- as.character(values)
+    if (length(values) == 0 || !is.list(M_)) {
+        return(values)
+    }
+    has_suffix <- grepl("_gap_loss$", values)
+    base_values <- sub("_gap_loss$", "", values)
+    resolved <- ezdyn_resolve_aliases(base_values, M_, M_$varmeta, "dynare_name", "display_name",
+                                      valid_codes = NULL, input_name = "policy variable")
+    ifelse(has_suffix, paste0(resolved, "_gap_loss"), resolved)
+}
+
+# Resolve one optimal-policy shock identifier (description or code)
+# permissively, mirroring `ezdyn_resolve_policy_variable_names()`.
+ezdyn_resolve_policy_shock_name <- function(value, M_) {
+    value <- as.character(value)
+    if (length(value) == 0 || !is.list(M_)) {
+        return(value)
+    }
+    ezdyn_resolve_aliases(value, M_, M_$shock_meta, "shock", "description",
+                          valid_codes = NULL, input_name = "policy shock")
 }
 
 #' Return verified anticipated shock codes.

@@ -12,17 +12,22 @@
 #' @param shock_name name of the shock
 #' @param T_shock 
 #' @param lambda Gabaix discounting parameter. This is the fraction of people who become aware of the shock in each period. 
+#' @param var_names Optional response variables to retain.
+#' @param cache Logical. If `TRUE`, read/write the result from/to `oo_$.irf_cache`
+#'   (see `ezdyn_irf_cache()`), keyed on `horizon`, `shock_name`, `T_shock`, `lambda` and `var_names`.
 #' 
 #' @examples
 #' ir_matrix_discounted <- get_ir_matrix_gabaix(M_, oo_, 40, "eps_r", 5, 0.8)
 #' ir_matrix_discounted$Mh_total[1,1,1,1]
 #'
-get_ir_matrix_gabaix <- function(M_, oo_, horizon, shock_name, T_shock, lambda) {
+get_ir_matrix_gabaix <- function(M_, oo_, horizon, shock_name, T_shock, lambda, var_names = NULL, cache = FALSE) {
+    key <- deparse1(list(horizon, shock_name, T_shock, lambda, var_names))
+    ezdyn_irf_cache(oo_, cache, key, function() {
     # Get effect of fully anticipated shocks in all periods. 
     shock_names <- paste0(shock_name, "_", 1:T_shock)
     shock_timing <- purrr::map(1:T_shock, function(x) 1:T_shock) # eps_r_1 is equivalent to eps_r 
     names(shock_timing) <- shock_names
-    Mh_ant <- get_ir_matrix(M_, oo_, horizon, shock_timing)
+    Mh_ant <- get_ir_matrix(M_, oo_, horizon, shock_timing, var_names = var_names)
     
     # Define three things: 
         # s_ann: Shock announcement period
@@ -98,4 +103,5 @@ get_ir_matrix_gabaix <- function(M_, oo_, horizon, shock_name, T_shock, lambda) 
     Mh_total <- array(Mh_total, dim=c(dim(Mh_total)[1:2], 1, dim(Mh_total)[[3]]),
                       dimnames = append(dimnames(Mh_total)[1:2], append(list("shock_var"=shock_name), dimnames(Mh_total)[3])))
     list(Mh_total=Mh_total, Mh_marginal=Mh_marginal)
+    })
 }

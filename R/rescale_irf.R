@@ -1,3 +1,44 @@
+# Build an O(1)-lookup, first-match environment mapping `dynare_name` to its
+# `scale_factor`, so `rescale()`/`rescale_irf()` avoid re-scanning the whole
+# `varmeta` table (an O(n^2) cost across all IRF response variables) for every
+# column being rescaled.
+ezdyn_scale_lookup <- function(M_) {
+    lookup <- new.env(parent = emptyenv())
+    varmeta <- M_$varmeta
+    if (is.null(varmeta) || !("dynare_name" %in% names(varmeta)) || !("scale_factor" %in% names(varmeta))) {
+        return(lookup)
+    }
+    dynare_names <- varmeta$dynare_name
+    for (i in seq_along(dynare_names)) {
+        varname <- dynare_names[[i]]
+        if (!is.na(varname) && nzchar(varname) && !exists(varname, envir = lookup, inherits = FALSE)) {
+            assign(varname, varmeta$scale_factor[[i]], envir = lookup)
+        }
+    }
+    lookup
+}
+
+# Apply one variable's cached scale factor/function to its IRF column. A
+# missing lookup entry means the variable isn't in `varmeta`, so `obj` is left
+# untouched (matches the previous `varname %in% ...` behaviour); a `NULL`
+# scale factor means "no scaling", equivalent to the previous identity-`scale`
+# no-op.
+ezdyn_apply_scale <- function(obj, varname, lookup) {
+    if (!exists(varname, envir = lookup, inherits = FALSE)) {
+        return(obj)
+    }
+    scale_ <- get(varname, envir = lookup, inherits = FALSE)
+    if (is.null(scale_)) {
+        return(obj)
+    }
+    if (is.function(scale_)) {
+        obj[, varname] <- scale_(obj[, varname])
+    } else {
+        obj[, varname] <- scale_ * obj[, varname]
+    }
+    obj
+}
+
 #' Rescale IRF using function or rescaling factor provided by user in metadata.
 #'
 #' @param irf IRF data frame or matrix with columns matching `M_$endo.names`.
@@ -7,22 +48,10 @@
 #' @return Rescaled IRF object with the same shape as input.
 #' @export
 rescale_irf <- function(irf, M_) {
-    for (k in seq_along(M_$endo.names)){
-        varname <- M_$endo.names[[k]]
-        if (varname %in% M_$varmeta$dynare_name) {
-            scale_ = M_$varmeta$scale_factor[M_$varmeta$dynare_name == varname][[1]]
-            if (is.null(scale_)) { # If no scale defined, just return unscaled.
-                scale <- function(x) {x}    
-            } else if (!is.function(scale_)) { # If the scale is not a function (integer), the function should be x*scale
-                scale <- function(x) {scale_*x}
-            } else { # Case when scale is already a function
-                scale <- scale_
-            }
-            if (!is.null(scale)) {
-                irf[, varname] <- scale(irf[, varname]) 
-            }    
-        }
-    }    
+    lookup <- ezdyn_scale_lookup(M_)
+    for (varname in M_$endo.names) {
+        irf <- ezdyn_apply_scale(irf, varname, lookup)
+    }
     irf
 }
 
@@ -35,21 +64,10 @@ rescale_irf <- function(irf, M_) {
 #' @return Rescaled object with the same shape as input.
 #' @export
 rescale <- function(obj, M_) {
-    for (varname in colnames(obj)){
-        if (varname %in% M_$varmeta$dynare_name) {
-            scale_ = M_$varmeta$scale_factor[M_$varmeta$dynare_name == varname][[1]]
-            if (is.null(scale_)) { # If no scale defined, just return unscaled.
-                scale <- function(x) {x}    
-            } else if (!is.function(scale_)) { # If the scale is not a function (integer), the function should be x*scale
-                scale <- function(x) {scale_*x}
-            } else { # Case when scale is already a function
-                scale <- scale_
-            }
-            if (!is.null(scale)) {
-                obj[, varname] <- scale(obj[, varname]) 
-            }    
-        }
-    }    
+    lookup <- ezdyn_scale_lookup(M_)
+    for (varname in colnames(obj)) {
+        obj <- ezdyn_apply_scale(obj, varname, lookup)
+    }
     obj
 }
 
