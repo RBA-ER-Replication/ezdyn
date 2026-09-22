@@ -1,7 +1,7 @@
 # ezdyn
 
 `ezdyn` is an R package for loading linear dynamic models, calculating impulse
-responses, historical shock decompositions, and alternative policy paths, then
+responses, historical shock decompositions, optimal policy, and alternative policy paths, then
 plotting the results consistently across one or more models.
 
 It works with Dynare model objects exported by ezDynare and with custom IRF
@@ -247,16 +247,6 @@ configured models and browse all three tables (in `"dt"` mode) side by side.
 
 ## Planned enhancements (TODO)
 
-- **Display names in `get_policy_scenario()`.** `policy_strategy$output_variables`,
-  `loss_variables`, `instrument_variable`, and `constraints` currently must be
-  supplied as the model's own variable codes, matched directly against the
-  `baseline` data frame's column names in `policy_scenarios.R`. This is
-  inconsistent with `get_irf_target()`'s `target`/`shock_timing`, which
-  already resolve either a metadata `display_name` or the raw code via
-  `ezdyn_resolve_target_names()`/`ezdyn_resolve_shock_timing_names()`. Extend
-  `get_policy_scenario()` (and the baseline it expects) to accept display
-  names in the same way, so a `policy_strategy` can be written without
-  needing to know the model's internal variable codes.
 - **Alternative Paths model selection.** The Alternative Paths tab always
   calls `get_alt_paths(models = config$models, ...)` with every registered
   model (`dash_alt_paths_tab.R`), with no UI control to narrow this down. For
@@ -270,7 +260,7 @@ configured models and browse all three tables (in `"dt"` mode) side by side.
 
 ## Further information
 
-Full public documentation (and release of dashboard code) coming soon.
+Full public documentation coming soon.
 
 Use `?read_dynare`, `?custom_moo`, `?get_irf_target`, `?get_alt_paths`, and
 `?ez_hd` for full function documentation and input requirements.
