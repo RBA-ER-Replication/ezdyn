@@ -13,7 +13,8 @@ get_irf_target_gabaix(
   lambda,
   pretty = FALSE,
   shock_nickname = "",
-  scale_targets = TRUE
+  scale_targets = TRUE,
+  cache = FALSE
 )
 }
 \arguments{
@@ -42,6 +43,9 @@ to be in displayed IRF units and are divided by each variable's numeric
  is not usable and so an error is thrown; use `scale_targets=FALSE` to
  supply targets directly in model units. If FALSE, targets should be provided in
  'unscaled' units (i.e. the units used in the dynare object or input IRF).}
+
+\item{cache}{Logical. If `TRUE`, read/write the underlying IRF from/to
+`oo_$.irf_cache` (see `ezdyn_irf_cache()`).}
 }
 \value{
 An MxH matrix (response vars x horizon) or pretty data frame when

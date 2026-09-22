@@ -15,8 +15,9 @@ format_alt_paths_long(
 )
 }
 \arguments{
-\item{pretty_df}{Output pretty data frame from get_alt_paths() or
-get_alt_paths_ye().}
+\item{pretty_df}{Output pretty data frame from [get_alt_paths()]. A
+year-ended variable (e.g. `infl_obs_ye`) is an ordinary metadata-declared
+derived variable, resolved automatically like any other response.}
 
 \item{output_vars}{Optional vector or list of variable names in
 `dynare_name` format to keep in the output. If `NA` (default), all

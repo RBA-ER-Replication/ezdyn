@@ -8,12 +8,25 @@ H: Number of time periods (i.e. horizon)
 S: Number of shock variables.
 T: Maximum period in which a shock occurs.}
 \usage{
-get_ir_matrix(M_, oo_, horizon = 40, shock_timing)
+get_ir_matrix(
+  M_,
+  oo_,
+  horizon = 40,
+  shock_timing,
+  var_names = NULL,
+  cache = FALSE
+)
 }
 \arguments{
 \item{horizon}{horizon for which the irf is plotted.}
 
 \item{shock_timing}{Named list. Name is the name of the shock, values are a list of periods in which the shock is active.}
+
+\item{var_names}{Optional response variables to retain. Derived policy
+variables ending in `_gap_loss` inherit the IRF of their underlying level.}
+
+\item{cache}{Logical. If `TRUE`, read/write the result from/to `oo_$.irf_cache`
+(see `ezdyn_irf_cache()`), keyed on `horizon`, `shock_timing` and `var_names`.}
 }
 \description{
 Create a MxHxSxT matrix where:

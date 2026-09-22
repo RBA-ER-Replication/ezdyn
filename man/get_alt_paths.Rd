@@ -14,7 +14,8 @@ get_alt_paths(
   instrument_shock_name = "Monetary policy shock",
   forecast_start,
   forecast_end,
-  data_start
+  data_start,
+  cache = TRUE
 )
 }
 \arguments{
@@ -37,6 +38,9 @@ get_alt_paths(
 \item{forecast_end}{Last forecast quarter.}
 
 \item{data_start}{First baseline quarter returned.}
+
+\item{cache}{Logical. If `TRUE` (default), read/write underlying IRFs
+from/to each model's `oo_$.irf_cache` (see `ezdyn_irf_cache()`).}
 }
 \value{
 Pretty tibble containing the shared baseline and model-specific paths.

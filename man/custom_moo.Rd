@@ -9,7 +9,8 @@ custom_moo(
   model_name = NULL,
   meta = NULL,
   param_df = data.frame(),
-  subset_vars = FALSE
+  subset_vars = FALSE,
+  colour = NULL
 )
 }
 \arguments{
@@ -26,6 +27,10 @@ alt_paths [T/F whether to  include on alt paths module]).}
 evaluate scaling formulas. Default is an empty dataframe.}
 
 \item{subset_vars}{Boolean. if TRUE, clear the IRF dataframe of all variables not in subset_vars.}
+
+\item{colour}{Optional colour used for this model's lines in [plot_pretty()]/
+[plot_pretty_graph()] (e.g. alternative-path or optimal-policy comparisons).
+`NULL` (default) leaves the model in the automatic dynamic palette.}
 }
 \value{
 A full MOO pair of class `custom_moo`, containing `M_` and `oo_`.

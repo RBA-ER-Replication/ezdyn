@@ -11,7 +11,16 @@ This is equivalent to some linear combination of fully anticipated
 shocks announced in periods 1 to T_shock (i.e. s_ann=1:T_shock) and 
 with anticipation horizon h_ant=1 to T_shock.}
 \usage{
-get_ir_matrix_gabaix(M_, oo_, horizon, shock_name, T_shock, lambda)
+get_ir_matrix_gabaix(
+  M_,
+  oo_,
+  horizon,
+  shock_name,
+  T_shock,
+  lambda,
+  var_names = NULL,
+  cache = FALSE
+)
 }
 \arguments{
 \item{M_}{M_ object.}
@@ -25,6 +34,11 @@ get_ir_matrix_gabaix(M_, oo_, horizon, shock_name, T_shock, lambda)
 \item{T_shock}{}
 
 \item{lambda}{Gabaix discounting parameter. This is the fraction of people who become aware of the shock in each period.}
+
+\item{var_names}{Optional response variables to retain.}
+
+\item{cache}{Logical. If `TRUE`, read/write the result from/to `oo_$.irf_cache`
+(see `ezdyn_irf_cache()`), keyed on `horizon`, `shock_name`, `T_shock`, `lambda` and `var_names`.}
 }
 \description{
 Get IRF matrix for partially anticipated shock, using cognitive discounting.
