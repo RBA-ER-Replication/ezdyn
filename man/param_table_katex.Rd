@@ -19,5 +19,8 @@ param_table_katex(M_, type = NULL, dp = 3, as_of = NULL)
 HTML `kableExtra` table.
 }
 \description{
-Render KaTeX parameter table from model object
+Deprecated: use [get_param_table()] instead. This wrapper simply calls
+`get_param_table(M_, type, mode = "katex", dp, as_of)` and is kept only so
+existing callers (e.g. Rmd reports) keep working unchanged.
 }
+\keyword{internal}

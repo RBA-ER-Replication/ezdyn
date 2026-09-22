@@ -12,7 +12,7 @@ plot_alt_paths(
   plot_model = "DINGO",
   plot_start_date,
   plot_end_date,
-  plotter = "ggrba"
+  plotter = NULL
 )
 }
 \arguments{
@@ -31,7 +31,9 @@ are available for a response.}
 
 \item{plot_end_date}{Last plotting date.}
 
-\item{plotter}{Plotting backend. `"ggrba"` (default) or optional `"ggplot"`.}
+\item{plotter}{Plotting backend, `"ggrba"` or `"ggplot"`. `NULL` (default)
+uses `"ggrba"` when the optional ggrba package is installed, otherwise
+falls back to `"ggplot"`.}
 }
 \value{
 List with `graph`, `graph_data`, and `graph_fname`.

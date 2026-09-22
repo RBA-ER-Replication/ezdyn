@@ -8,10 +8,11 @@
 plot_pretty_graph(
   df,
   line_style = c("combined", "split"),
-  plotter = c("ggrba", "ggplot"),
+  plotter = NULL,
   custom_title = NULL,
   baseline_name = "Baseline",
-  baseline_colour = "royalblue"
+  baseline_colour = "royalblue",
+  date_range = NULL
 )
 
 irf_plot_pretty_graph(...)
@@ -21,13 +22,17 @@ irf_plot_pretty_graph(...)
 
 \item{line_style}{How to treat shock/model combinations for lines.}
 
-\item{plotter}{Plotting backend. `"ggrba"` (default) or `"ggplot"`.}
+\item{plotter}{Plotting backend, `"ggrba"` or `"ggplot"`. `NULL` (default)
+uses `"ggrba"` when the optional ggrba package is installed, otherwise
+falls back to `"ggplot"`.}
 
 \item{custom_title}{Provide custom title if TRUE.}
 
 \item{baseline_name}{Label used for an alternative-path baseline.}
 
 \item{baseline_colour}{Colour used for an alternative-path baseline.}
+
+\item{date_range}{Optional two-Date x-axis range for alternative-path plots.}
 }
 \value{
 List containing the `graph` and `graph_fname`.

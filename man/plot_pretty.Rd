@@ -11,12 +11,13 @@ plot_pretty(
   dynare_names = NULL,
   shocks = NULL,
   line_style = c("combined", "split"),
-  plotter = c("ggrba", "ggplot"),
+  plotter = NULL,
   title = NULL,
   cumulate = FALSE,
   baseline_name = "Baseline",
   baseline_colour = "royalblue",
-  collapse_baseline = TRUE
+  collapse_baseline = TRUE,
+  date_range = NULL
 )
 
 plot_pretty_irf(
@@ -25,7 +26,7 @@ plot_pretty_irf(
   display_names = NULL,
   shocks = NULL,
   line_style = c("combined", "split"),
-  plotter = c("ggrba", "ggplot"),
+  plotter = NULL,
   title = NULL,
   cumulate = FALSE,
   baseline_name = "Baseline",
@@ -49,7 +50,9 @@ the same Dynare name can identify different variables across models.}
 \item{line_style}{"combined" uses a single legend for shock-model pairs; "split"
 uses colour for shock and linetype for model.}
 
-\item{plotter}{Plotting backend. `"ggrba"` (default) or `"ggplot"`.}
+\item{plotter}{Plotting backend, `"ggrba"` or `"ggplot"`. `NULL` (default)
+uses `"ggrba"` when the optional ggrba package is installed, otherwise
+falls back to `"ggplot"`.}
 
 \item{title}{Provide a custom title for the chart.}
 
@@ -63,6 +66,8 @@ Not currently implemented.}
 
 \item{collapse_baseline}{Whether to collapse identical manually duplicated
 alternative-path baseline rows. Non-identical duplicates always error.}
+
+\item{date_range}{Optional two-Date x-axis range for alternative-path plots.}
 }
 \value{
 List with `graph`, `graph_data`, and `graph_fname`.

@@ -4,7 +4,7 @@
 \alias{read_dynare}
 \title{Read Dynare output from JSON or MAT files.}
 \usage{
-read_dynare(path, path_meta = NULL, model_name = NULL)
+read_dynare(path, path_meta = NULL, model_name = NULL, colour = NULL)
 }
 \arguments{
 \item{path}{Path to Dynare output (`.json` preferred; `.mat` quasi-supported).}
@@ -14,6 +14,10 @@ read_dynare(path, path_meta = NULL, model_name = NULL)
 Can include additional columns if you like as well.}
 
 \item{model_name}{Optional model name.}
+
+\item{colour}{Optional colour used for this model's lines in [plot_pretty()]/
+[plot_pretty_graph()] (e.g. alternative-path or optimal-policy comparisons).
+`NULL` (default) leaves the model in the automatic dynamic palette.}
 }
 \value{
 A full MOO pair of class `dynare`, containing `oo_` and `M_`.
