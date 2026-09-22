@@ -1,0 +1,90 @@
+testthat::test_that("Variable Dictionary UI exposes a multi-model selector, codes toggle, and sub-tabs", {
+  config <- dashboard_test_config()
+
+  ui_html <- htmltools::renderTags(UITab_Dictionary("dict", config))$html
+  testthat::expect_match(ui_html, "dict-models")
+  testthat::expect_match(ui_html, "Model\\(s\\):")
+  testthat::expect_match(ui_html, "dict-show_codes")
+  testthat::expect_match(ui_html, "Show underlying codes")
+  testthat::expect_match(ui_html, "Parameters")
+  testthat::expect_match(ui_html, "Variables")
+  testthat::expect_match(ui_html, "Shocks")
+})
+
+testthat::test_that("dictionary_section_ui shows a DT placeholder per capable model and a fallback note otherwise", {
+  models <- list(
+    DINGO = dashboard_test_model("DINGO", include_param_table = TRUE),
+    MARTIN = dashboard_test_model("MARTIN")
+  )
+
+  ui_html <- htmltools::renderTags(dictionary_section_ui(
+    shiny::NS("dict"), "parameters", models, dictionary_has_param_table,
+    "No parameter metadata available for this model."
+  ))$html
+
+  testthat::expect_match(ui_html, "DINGO")
+  testthat::expect_match(ui_html, "MARTIN")
+  testthat::expect_match(ui_html, "dict-parameters_DINGO")
+  testthat::expect_match(ui_html, "No parameter metadata available for this model.")
+  testthat::expect_false(grepl("dict-parameters_MARTIN", ui_html))
+})
+
+testthat::test_that("dictionary_section_ui asks for a model when none are selected", {
+  ui_html <- htmltools::renderTags(dictionary_section_ui(
+    shiny::NS("dict"), "parameters", list(), dictionary_has_param_table, "unused"
+  ))$html
+  testthat::expect_match(ui_html, "Select at least one model")
+})
+
+testthat::test_that("dictionary_render_section only populates outputs for capable models", {
+  models <- list(
+    DINGO = dashboard_test_model("DINGO", include_param_table = TRUE),
+    MARTIN = dashboard_test_model("MARTIN")
+  )
+  fake_output <- new.env()
+
+  dictionary_render_section(
+    fake_output, "parameters", models, dictionary_has_param_table,
+    function(model) get_param_table(model$M_, mode = "dt")
+  )
+
+  testthat::expect_true(is.function(fake_output$parameters_DINGO))
+  testthat::expect_null(fake_output$parameters_MARTIN)
+})
+
+testthat::test_that("Variable Dictionary server exposes selected models and renders per-model content", {
+  config <- configure_dashboard(
+    models = list(
+      DINGO = dashboard_test_model("DINGO", include_param_table = TRUE),
+      MARTIN = dashboard_test_model("MARTIN")
+    ),
+    timeline = dashboard_test_timeline(),
+    baselines = list(Staff = dashboard_test_baseline()),
+    default_baseline = "Staff"
+  )
+
+  shiny::testServer(
+    ServerTab_Dictionary,
+    args = list(id = "dict", config = config),
+    {
+      session$setInputs(models = c("DINGO", "MARTIN"), show_codes = FALSE)
+
+      testthat::expect_setequal(names(selected_models()), c("DINGO", "MARTIN"))
+
+      parameters_html <- paste(output$parameters_content, collapse = "")
+      testthat::expect_match(parameters_html, "DINGO")
+      testthat::expect_match(parameters_html, "No parameter metadata available for this model.")
+
+      variables_html <- paste(output$variables_content, collapse = "")
+      testthat::expect_match(variables_html, "dict-variables_DINGO")
+      testthat::expect_match(variables_html, "dict-variables_MARTIN")
+
+      shocks_html <- paste(output$shocks_content, collapse = "")
+      testthat::expect_match(shocks_html, "dict-shocks_DINGO")
+      testthat::expect_match(shocks_html, "dict-shocks_MARTIN")
+
+      session$setInputs(models = "DINGO")
+      testthat::expect_setequal(names(selected_models()), "DINGO")
+    }
+  )
+})
