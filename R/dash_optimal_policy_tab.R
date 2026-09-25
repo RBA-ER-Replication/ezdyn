@@ -454,6 +454,9 @@ ServerTab_OptimalPolicy <- function(id, config) {
       loss_variables <- input$loss_variables
       targets <- stats::setNames(vapply(loss_variables, function(variable) input[[paste0("target_", optimal_policy_widget_id(variable))]], numeric(1)), loss_variables)
       baseline <- optimal_policy_add_gaps(prepared_baseline(), loss_variables, targets)
+      # Timeless commitment evaluates past vintages against the same targets.
+      vintages <- policy$loss_variable_vintages
+      if (!is.null(vintages)) vintages <- optimal_policy_add_gaps(vintages, loss_variables, targets)
       constraints <- optimal_policy_constraints(input, config)
       strategies <- optimal_policy_strategies(input, constraints, config)
       run_one <- function(model, strategy, use_cd, lambda) {
@@ -467,7 +470,7 @@ ServerTab_OptimalPolicy <- function(id, config) {
           assign(key, value, envir = cache)
           value
         }
-        get_policy_scenario(strategy, baseline, model, use_cd, lambda, policy$forecast_start, policy$forecast_end, policy$loss_variable_vintages, input$preloss_start, irfs)
+        get_policy_scenario(strategy, baseline, model, use_cd, lambda, policy$forecast_start, policy$forecast_end, vintages, input$preloss_start, irfs)
       }
       scenarios <- lapply(strategies, run_one, model = policy_model, use_cd = policy$use_cd, lambda = input$lambda)
       data <- dplyr::bind_rows(scenarios)

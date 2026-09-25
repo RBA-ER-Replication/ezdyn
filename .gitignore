@@ -1,0 +1,2 @@
+# Keep API keys (e.g. FRED_API_KEY) out of the repo
+.Renviron
