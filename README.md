@@ -8,9 +8,9 @@ It works with Dynare model objects exported by ezDynare and with custom IRF
 datasets supplied in a simple long format.
 
 ## Getting started
-To install and load in models, see [Installation and loading a model](#installation-and-loading-a-model).
+See [Installation and loading a model](#installation-and-loading-a-model).
 
-You can use ezdyn to: 
+Then, you can use ezdyn to: 
 1. Building a dashboard
 2. Run tasks in code
 
@@ -40,8 +40,8 @@ shiny::runApp(ezdyn_dashboard(config))
 A full example is available in the `example-dashboard` folder.
 
 
-## Any task can be completed in 2 lines of code
-For each functionality:
+## Using the command line
+Any functionality can be completed in two lines of code:
 1. Run the relevant function which gets your results in a nice table.
 2. Call `plot_pretty` to automatically plots your results.
 
