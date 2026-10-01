@@ -1,152 +1,98 @@
 # ezdyn
 
 `ezdyn` is an R package for loading linear dynamic models, calculating impulse
-responses, historical shock decompositions, optimal policy, and alternative policy paths, then
+responses, historical shock decompositions, and alternative policy paths, then
 plotting the results consistently across one or more models.
 
 It works with Dynare model objects exported by ezDynare and with custom IRF
 datasets supplied in a simple long format.
 
-## The ezdyn ecosystem
+## Getting started
+To install and load in models, see [Installation and loading a model](#installation-and-loading-a-model).
 
-- **ezdyn**: R package for loading models, including Dynare models, and
-  performing IRF analysis, historical shock decomposition, and alternative policy
-  exercises across multiple models.
-- **ezdyn dashboard**: an interactive dashboard for working with a configured
-  set of models through the `ezdyn` functions.
-- **ezDynare**: MATLAB helpers for running Dynare programmatically and
-  exporting model objects for use in R.
+You can use ezdyn to: 
+1. Building a dashboard
+2. Run tasks in code
 
-## Installation
+## Build a dashboard
 
-Install `ezdyn` from a local source checkout:
+Simply provide a list of models and a spreadsheet containing forecast (and the dates).
 
 ```r
-pak::pkg_install(".")
-```
+baseline <- import_baseline("baseline.xlsx", source_model = model, models = models)
 
-The default plotting backend uses the RBA-styled `ggrba` package. `ggrba` is an
-optional dependency; when it is not installed, plotting functions automatically
-fall back to the portable `ggplot2` backend. Force a specific backend with
-`plotter = "ggrba"` or `plotter = "ggplot"` (an explicit `plotter = "ggrba"`
-still errors if the package is not installed). The dashboard exposes the same
-choice as a "Plot style" control under each tab's Advanced options.
-
-## Model inputs
-
-Most workflows need a model pair and a metadata workbook:
-
-- `M_` holds the model configuration and metadata.
-- `oo_` holds numerical results such as Dynare decision rules or supplied IRFs.
-- Metadata supplies display names, units, scaling rules, and optional shock
-  descriptions.
-
-Load a model exported from Dynare:
-
-```r
-library(ezdyn)
-
-model_a <- read_dynare(
-  path = "model_a.json",
-  path_meta = "variable_metadata.xlsx",
-  model_name = "Model A"
+config <- configure_dashboard(
+  name     = "ezdyn Dashboard",
+  models   = models,
+  timeline = list(
+    data_start     = as.Date("2010-03-01"),
+    data_end       = as.Date("2026-06-01"),
+    forecast_start = as.Date("2026-09-01"),
+    forecast_end   = as.Date("2029-06-01")
+  ),
+  baselines        = list("Baseline Forecast" = baseline),
+  default_baseline = "Baseline Forecast"
 )
 
+shiny::runApp(ezdyn_dashboard(config))
 ```
 
-Or load custom IRFs in long format with `t`, `resp_var`, `shock`, and `value`
-columns:
+A full example is available in the `example-dashboard` folder.
+
+
+## Any task can be completed in 2 lines of code
+For each functionality:
+1. Run the relevant function which gets your results in a nice table.
+2. Call `plot_pretty` to automatically plots your results.
+
+Functionalities include: 
+- Impulse responses and impulse response matching
+- Alternative policy paths
+- Optimal policy exercises
+- Historical shock decompositions
+- Parameter, variable and shock tables
+
+
+## Impulse responses
+
+`get_irfs_target()` solves for the shock sequence
+needed to hit a target path for one or more variables, then returns the
+response of every endogenous variable.  
+
+For example: "what shock sequence delivers a
+25bp cash-rate cut, held over 8 periods, and what does that imply for inflation and output?"
 
 ```r
-model_b <- custom_moo(
-  irf = model_b_irfs,
-  meta = "variable_metadata.xlsx",
-  model_name = "Model B"
-)
-
-```
-
-The examples below use `model_a` and `model_b` as full MOO pairs. Replace the
-example variable and shock names with the names or metadata descriptions in
-your model.
-
-## IRFs and IRF matching
-
-`get_irf()` returns ordinary impulse responses. `get_irf_target()` solves for
-the sequence of shocks needed to hit a target path, then returns the response
-of every endogenous variable. The same code works for each model, so results
-can be combined and plotted together.
-
-To compare several models at once, pass a named list of models to
-`get_irfs_target()` (or `get_irf()`'s multi-model counterpart, `get_irfs()`)
-instead of calling the single-model function once per model and `rbind()`-ing
-the results by hand. `target` and `shock_timing` are resolved independently
-for each model using that model's own metadata, so the same call works
-whether every model shares a display name/shock description or each has its
-own code for the same shock:
-
-```r
-models <- list("Model A" = model_a, "Model B" = model_b)
-
-target <- list("Cash rate" = rep(-0.25, 8))
-shock_timing <- list("Monetary policy shock" = 1:8)
-
 irfs <- get_irfs_target(
-  models,
-  horizon = 16,
-  target = target,
-  shock_timing = shock_timing,
-  shock_nickname = "Lower cash-rate path"
+  models, horizon = 16,
+  target = list("Cash Rate" = rep(-0.25, 8)), 
+  shock_timing = list("Monetary policy shock" = 1:8), # Shocks in period 1-8
+  shock_nickname = "Lower cash rate path"
 )
 
-plot_pretty(
-  irfs,
-  display_names = c("Cash rate", "Inflation", "Output")
-)$graph
+plot_pretty(irfs, display_names = c("Cash Rate", "Inflation", "Output"))$graph
 ```
 
-For an ordinary IRF, replace `get_irfs_target()` with `get_irfs()` and supply
-the shock names and horizon:
+`get_irfs_target_gabaix()` is the equivalent for partially anticipated
+(cognitive-discounting) shocks, taking an additional discount parameter
+`lambda`.
 
-```r
-irfs <- get_irfs(
-  models,
-  shock_names = "Monetary policy shock",
-  horizon = 16
-)
-
-plot_pretty(irfs, display_names = c("Inflation", "Output"))$graph
-```
-
-`get_irfs_target_gabaix()` is the equivalent multi-model wrapper for
-`get_irf_target_gabaix()`, described below.
+`get_irf` reports raw IRFs (not matched to a particular endogenous variable value).
 
 ## Alternative policy paths
 
+Alternative path analysis starts from a shared baseline forecast, built once
+with `import_baseline()`, and one or more candidate policy-rate paths.
 
-Alternative paths start with a shared baseline and one or more paths for the
-policy instrument. `import_baseline()` normalises the baseline into the common
-display-name and unit space; `get_alt_paths()` calculates results for every
-named model; `plot_pretty()` plots the combined output.
+`get_alt_paths()` solves for the shocks needed to hit each candidate path in
+every model and returns a nice data frame of the results.
 
 ```r
-models <- list(
-  `Model A` = model_a,
-  `Model B` = model_b
-)
+baseline <- import_baseline("baseline.xlsx", source_model = model_a, models = models)
 
-baseline <- import_baseline(
-  input = "baseline.xlsx",
-  source_model = model_a,
-  models = models
-)
-
-# The workbook contains one quarterly Date column and one numeric cash-rate
-# path column for each alternative scenario.
-alternative_paths <- readxl::read_excel("alternative_paths.xlsx")
-
-paths <- get_alt_paths(
-  alt_paths = alternative_paths,
+# One quarterly date column plus one cash-rate path column per scenario.
+alt_paths <- get_alt_paths(
+  alt_paths = readxl::read_excel("alternative_paths.xlsx"),
   models = models,
   baseline = baseline,
   forecast_start = as.Date("2026-03-01"),
@@ -154,109 +100,95 @@ paths <- get_alt_paths(
   data_start = as.Date("2020-03-01")
 )
 
-plot_pretty(
-  paths,
-  display_names = c("Cash rate", "Inflation", "Output")
-)$graph
+plot_pretty(alt_paths, display_names = c("Cash rate", "Inflation", "Output"))$graph
 ```
 
-## Historical shock decompositions
+`use_cd`/`lambda` toggle the partial-anticipation treatment of the policy
+shock, for models that support it; a model that cannot generate anticipated
+shocks falls back to an ordinary targeted IRF instead of failing.
 
-`ez_hd()` converts a Dynare historical shock decomposition, or supplied
-decomposition data, into a tidy table with metadata labels and units.
-`plot_pretty_hd()` then produces an (optionally interactive) contribution chart.
+## Optimal policy
+
+`get_policy_scenario()` solves for the policy path that minimises a given quadratic
+loss function, given a baseline and a model's policy impulse responses.
+
+```r
+strategy <- list(
+  output_name = "Optimal (Model A, commitment)",
+  output_variables = c("Cash Rate", "Inflation", "Unemployment"),
+  loss_variables = c("Inflation", "Unemployment", "Cash Rate"),
+  loss_weights = c(1, 1, 0.5),
+  discount_factor = 0.99,
+  T_loss = 20,
+  T_instrument = 20,
+  commit = "commit"
+)
+
+optimal <- get_policy_scenario(
+  strategy, baseline = baseline, model = model_a,
+  forecast_start = "2026-09-01", forecast_end = "2031-06-01"
+)
+
+plot_pretty(optimal, display_names = c("Cash rate", "Inflation", "Unemployment"))$graph
+```
+
+## Historical shock decomposition
+
+`ez_hd()` converts a Dynare historical shock decomposition -- or a supplied
+decomposition, for non-Dynare models -- into a tidy, labelled table.
+`plot_pretty_hd()` plots it, optionally aggregating shocks into named groups
+via `shock_group`.
 
 ```r
 hd_a <- ez_hd(model_a$M_, model_a$oo_)
 
-plot_pretty_hd(
-  hd_a,
-  display_names = c("Inflation", "Output")
-)$graph
+plot_pretty_hd(hd_a, display_names = c("Inflation", "Output"), shock_group="Demand/Supply/Foreign")$graph
 ```
 
-To use a decomposition produced elsewhere, supply a long data frame with `t`,
-`shock`, `variable`, and `value` columns:
 
-```r
-custom_decomposition <- data.frame(
-  t = 1:8,
-  shock = "Demand shock",
-  variable = "output",
-  value = 0
-)
-
-hd_b <- ez_hd(model_b$M_, hd_override = custom_decomposition)
-
-plot_pretty_hd(
-  hd_b,
-  display_names = c("Inflation", "Output")
-)$graph
-```
 ## Parameter, variable, and shock tables
 
-`get_param_table()` turns the parameter values in a model object into a
-table. When the metadata workbook includes a `parameters` sheet, the table
-can use parameter labels, descriptions, sectors, types, and notes. Use `type`
-to show one parameter group, or omit it to show all parameters. `mode`
-selects the output format: `"katex"` (the default) returns a static, styled
-HTML table suited to reports; `"dt"` returns an interactive, sortable/
-searchable table suited to a live dashboard. `show_codes = TRUE` adds the
-model's own raw parameter code alongside the rendered symbol, for users who
-need to match a displayed parameter back to the underlying model code.
+`get_param_table()`, `get_variable_table()`, and `get_shock_table()` turn a
+model's parameters, variables, and shocks into labelled tables from the
+metadata workbook. `mode` selects `"katex"` (static, for reports) or `"dt"`
+(interactive, for a dashboard); `show_codes = TRUE` adds the model's own raw
+code alongside the rendered label.
 
 ```r
-get_param_table(
-  model_a$M_,
-  type = "Preferences",
-  mode = "katex",
-  dp = 3,
-  as_of = "August 2026"
-)
-```
-
-`param_table_katex()` is a deprecated alias for
-`get_param_table(mode = "katex")`, kept only so existing callers keep
-working unchanged.
-
-`get_variable_table()` and `get_shock_table()` are analogous functions for a
-model's variables and shocks: they list the display names/descriptions a
-model's metadata defines (the same information used to label plots and IRF
-selectors), with the same `mode`/`show_codes` arguments as
-`get_param_table()`. Shocks without a defined description fall back to
-showing their model code.
-
-```r
+get_param_table(model_a$M_, type = "Preferences", mode = "katex", dp = 3, as_of = "August 2026")
 get_variable_table(model_a$M_, mode = "dt", show_codes = TRUE)
 get_shock_table(model_a$M_, mode = "dt")
 ```
 
-The ezdyn dashboard's Variable Dictionary tab lets users pick one or more
-configured models and browse all three tables (in `"dt"` mode) side by side.
+## Installation and loading a model
+### Installation
 
-## Known issues
+Install `ezdyn` by cloning this repository and running:
 
-- `get_ir_matrix(..., var_names = ...)` (and anything that calls it with a
-  single requested variable, e.g. `build_policy_irfs(model, variable, ...)`)
-  errors with `'dims' cannot be of length 0` when `var_names` names exactly
-  **one** variable. Subsetting the IRF array down to one row collapses a
-  dimension that `get_ir_matrix()`'s internal `irf_for_shock()` still expects,
-  in `array(0, dim = dim(base_irf[, , shock_name]), ...)`. Work around it by
-  requesting two or more variables (e.g. `c("r_obs", "dr")` instead of just
-  `"dr"`). Not yet fixed.
+```r
+pak::pkg_install(".")
+```
 
-## Planned enhancements (TODO)
+### Loading a model
 
-- **Alternative Paths model selection.** The Alternative Paths tab always
-  calls `get_alt_paths(models = config$models, ...)` with every registered
-  model (`dash_alt_paths_tab.R`), with no UI control to narrow this down. For
-  dashboards with several heterogeneous models (e.g. DSGEModDash's SW +
-  curated Pfeifer NK models), this means every alt-path run computes
-  responses for models that may not even share the requested response
-  variable/instrument, which is unnecessary and slower than it needs to be.
-  Add a model-picker input (defaulting to all models, or perhaps to only
-  those exposing the current instrument) so users can select which
-  registered models are "applicable" to a given Alternative Paths exercise.
+A model object consists of: 
+1. A model, either: 
+- IRFs
+- A Dynare model object. You can use ezDynare to export a dynare model object from MATLAB. 
+2. **A metadata file**, which translates the model's variables into consistent human readable names and units. 
+- See [test_metadata_dynare.xlsx](tests/testthat/fixtures/dynare/test_metadata_dynare.xlsx) for a working example
+
+To load models: 
+```r
+library(ezdyn)
+# Load a model from Dynare
+model_a <- read_dynare("model_a.json", path_meta = "variable_metadata.xlsx", model_name = "Model A")
+
+# Load a model from a dataframe of IRFs
+model_b <- custom_moo(model_b_irfs, meta = "variable_metadata.xlsx", model_name = "Model B")
+
+models <- list("Model A" = model_a, "Model B" = model_b)
+```
 
 ## Further information
 
@@ -264,3 +196,13 @@ Full public documentation coming soon.
 
 Use `?read_dynare`, `?custom_moo`, `?get_irf_target`, `?get_alt_paths`, and
 `?ez_hd` for full function documentation and input requirements.
+
+
+## Known issues
+
+- `get_ir_matrix(..., var_names = ...)` errors with `'dims' cannot be of
+  length 0` when `var_names` names exactly **one** variable (affects any
+  caller that requests a single variable, e.g.
+  `build_policy_irfs(model, variable, ...)`). Work around it by requesting
+  two or more variables (e.g. `c("r_obs", "dr")` instead of just `"dr"`).
+  Not yet fixed.
