@@ -4,14 +4,13 @@
 responses, historical shock decompositions, and alternative policy paths, then
 plotting the results consistently across one or more models.
 
-It works with Dynare model objects exported by ezDynare and with custom IRF
-datasets supplied in a simple long format.
+It works with models exported from Dynare or just a dataframe of impulse responses.
 
 ## Getting started
 See [Installation and loading a model](#installation-and-loading-a-model).
 
-Then, you can use ezdyn to: 
-1. Building a dashboard
+Then, you can use ezdyn to either: 
+1. Build a dashboard
 2. Run tasks in code
 
 ## Build a dashboard
