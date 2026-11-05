@@ -7,8 +7,12 @@
 #' @param oo_ Dynare output structure containing simulation results.
 #' @param horizon Horizon to calculate impulse responses over.
 #' @param target Named list of target paths. Each entry is a numeric vector
-#'   for the target variable. Names can be variable display names from
-#'   Names can be variable 'display_name's from variable metadata or 'dynare_name's.
+#'   for the target variable. Names can be variable 'display_name's from
+#'   variable metadata or 'dynare_name's, in any order - the key order of
+#'   `target` need not match the model's internal variable order. Entries may
+#'   differ in length: shorter entries are auto-padded with trailing `NA`
+#'   (meaning "unconstrained" for those trailing periods) up to the length of
+#'   the longest entry.
 #' @param shock_timing Named list mapping shocks to the periods they are active,
 #'   e.g. `list("eps_r" = 1:4)`. Names can be shock descriptions from
 #'   `M_$shock_meta$description`; descriptions are matched before shock codes.
@@ -45,14 +49,17 @@ get_irf_target <- function(M_, oo_, horizon, target, shock_timing, pretty=FALSE,
     # Same renaming procedure for shock names
     shock_timing <- ezdyn_resolve_shock_timing_names(shock_timing, M_)
     
-    t_max_target <- as.data.frame(target) |> 
-        nrow()
+    t_max_target <- max(lengths(target))
     T_ <- max(c(t_max_target, horizon))
     # Get impulse responses to every shock that occurs.
     Mh <- get_ir_matrix(M_, oo_, T_, shock_timing, cache = cache)
+    # Target variables must be natively solved by the model - metadata-derived
+    # variables (e.g. year-ended inflation) have no row in this raw matrix.
+    ezdyn_validate_native_target_names(names(target), dimnames(Mh)[[1]], M_)
     
     # Flatten the target matrix so that each row is a response variable for a 
-    # particular time period.
+    # particular time period. Entries of `target` shorter than the longest are
+    # auto-padded with trailing NA (unconstrained periods) by flatten_target().
     target_flat <- target |>
         flatten_target()
     
@@ -67,14 +74,28 @@ get_irf_target <- function(M_, oo_, horizon, target, shock_timing, pretty=FALSE,
         flatten_ir_matrix(selected_periods = 1:t_max_target, 
                           selected_resp_vars=names(target))
     
-    if (sum(!is.na(target_flat)) != ncol(Mh_flat)) {
+    # When shocks in `shock_timing` are active for different numbers of
+    # periods, get_ir_matrix() still allocates a shock-period column for every
+    # period up to the shared maximum, for every shock - a shock's columns
+    # beyond its own last active period are never assigned and stay entirely
+    # NA. Drop these inactive columns; they carry no shock instrument to solve
+    # for.
+    active_shock_ix <- colSums(!is.na(Mh_flat)) > 0
+    Mh_flat <- Mh_flat[, active_shock_ix, drop = FALSE]
+    
+    # Only the non-NA (i.e. actually constrained) target rows enter the solve -
+    # NA rows correspond to unconstrained periods introduced by padding shorter
+    # target entries up to the longest one.
+    target_nan_ix <- is.na(target_flat)
+    if (sum(!target_nan_ix) != ncol(Mh_flat)) {
         stop("Mh_flat should be square. i.e. same number of shocks as target values.")
     }
     # Back out shocks required to hit the target.
-    shocks <- qr.solve(Mh_flat, target_flat)
+    shocks <- qr.solve(Mh_flat[which(!target_nan_ix), , drop = FALSE], target_flat[!target_nan_ix])
     # Given these shocks, solve for the IRF of ALL endogenous variables. 
     Mh_flat_all <- Mh |>
         flatten_ir_matrix()
+    Mh_flat_all <- Mh_flat_all[, active_shock_ix, drop = FALSE]
     irf <- Mh_flat_all %*% shocks # TODO: Add NAN filter in here.
     
     # Reshape output so rows are time and columns are endogenous variables. 

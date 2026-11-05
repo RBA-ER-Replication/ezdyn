@@ -3,21 +3,18 @@
 # This module owns optimal-policy inputs and session-local IRF caching. ezdyn
 # owns the optimisation and returns labelled, rescaled paths.
 
-#' Return available policy response choices from model metadata.
+#' Return response-variable choices common to selected policy models.
 #'
-#' @param model Full policy-model MOO pair.
-#' @return Named character vector from display names to model codes.
-optimal_policy_response_choices <- function(model) {
-  metadata <- model$M_$varmeta
-  keep <- !is.na(metadata$dynare_name) & metadata$dynare_name != "" &
-    !is.na(metadata$display_name) & metadata$display_name != ""
-  stats::setNames(metadata$dynare_name[keep], metadata$display_name[keep])
-}
-
-# Return display names for selected policy-model response codes.
-optimal_policy_response_display_names <- function(model, variables) {
-  choices <- optimal_policy_response_choices(model)
-  unname(names(choices)[match(variables, choices)])
+#' Response variables are display-name-valued (not one model's own dynare
+#' codes) so the same selection resolves against every selected model,
+#' however different their underlying codes are - reuses the same
+#' [irf_common_choices()]/[irf_model_display_names()] helpers the Alt Paths
+#' tab uses for its model-dependent response selector.
+#'
+#' @param models Named list of selected policy-model MOO pairs.
+#' @return Named character vector of display names common to every model.
+optimal_policy_response_choices <- function(models) {
+  irf_common_choices(models, irf_model_display_names)
 }
 
 #' Return the configured loss variables offered by the Optimal Policy tab.
@@ -114,7 +111,10 @@ optimal_policy_constraint_table <- function(ns, policy_dates, config) {
 #' @param input Shiny input values.
 #' @param constraints Policy constraint list.
 #' @param config Validated dashboard configuration.
-#' @return List of strategy specifications for [get_policy_scenario()].
+#' @return List of strategy specifications for [get_policy_scenarios()]. Each
+#'   strategy's `output_name` is left unset here - `get_policy_scenarios()`
+#'   builds it per model/strategy so the same strategy list works for any
+#'   number of configured models.
 optimal_policy_strategies <- function(input, constraints, config) {
   modes <- c("commit", "timeless", "disc")
   modes <- modes[modes %in% input$strategy_modes]
@@ -123,11 +123,6 @@ optimal_policy_strategies <- function(input, constraints, config) {
   }
   lapply(modes, function(mode) {
     list(
-      output_name = switch(
-        mode,
-        timeless = "Optimal (DINGO, commitment)",
-        disc = "Optimal (DINGO, discretion)"
-      ),
       output_variables = input$response_variables,
       loss_variables = paste0(input$loss_variables, "_gap_loss"),
       loss_weights = vapply(input$loss_variables, function(variable) input[[paste0("weight_", optimal_policy_widget_id(variable))]], numeric(1)),
@@ -181,16 +176,33 @@ optimal_policy_constraints <- function(input, config) {
 
 #' Add selected target-gap variables to an augmented policy baseline.
 #'
-#' @param baseline Model-code baseline.
-#' @param variables Selected level loss variables.
-#' @param targets Named numeric targets.
-#' @return Baseline with `_gap_loss` columns.
-optimal_policy_add_gaps <- function(baseline, variables, targets) {
+#' @param baseline Canonical, display-name-keyed baseline.
+#' @param variables Selected level loss variables. May be a model's own
+#'   dynare code or its display name - a dynare code is resolved to its
+#'   display name (via `model`) to find the baseline column, matching how
+#'   [get_policy_scenario()] itself resolves policy variables.
+#' @param targets Named numeric targets, keyed by `variables` exactly as
+#'   supplied.
+#' @param model Optional model pair used to resolve a dynare code to its
+#'   display name when `variables` is not already a baseline column. Omit
+#'   only when `variables` is already guaranteed to be display names.
+#' @return Baseline with `_gap_loss` columns, named from `variables` exactly
+#'   as supplied (unresolved), matching [optimal_policy_strategies()]'s own
+#'   `_gap_loss` naming so the two stay consistent.
+optimal_policy_add_gaps <- function(baseline, variables, targets, model = NULL) {
   for (variable in variables) {
-    if (!(variable %in% names(baseline))) {
+    source_column <- if (variable %in% names(baseline)) {
+      variable
+    } else if (!is.null(model)) {
+      candidate <- display_name(variable, model$M_)
+      if (candidate %in% names(baseline)) candidate else NA_character_
+    } else {
+      NA_character_
+    }
+    if (is.na(source_column)) {
       stop(sprintf("Policy baseline is missing `%s`.", variable), call. = FALSE)
     }
-    baseline[[paste0(variable, "_gap_loss")]] <- baseline[[variable]] - targets[[variable]]
+    baseline[[paste0(variable, "_gap_loss")]] <- baseline[[source_column]] - targets[[variable]]
   }
   baseline
 }
@@ -203,8 +215,9 @@ optimal_policy_add_gaps <- function(baseline, variables, targets) {
 UITab_OptimalPolicy <- function(id, config) {
   ns <- shiny::NS(id)
   policy <- config$optimal_policy
-  model <- config$models[[policy$policy_model]]
-  choices <- optimal_policy_response_choices(model)
+  model_choices <- irf_choices(policy$models)
+  selected_models <- irf_preserve_selection(policy$defaults$models, model_choices)
+  choices <- optimal_policy_response_choices(config$models[selected_models])
   loss_choices <- optimal_policy_loss_choices(config)
   policy_dates <- seq(policy$forecast_start, policy$forecast_end, by = "quarter")
   plot_range <- optimal_policy_default_plot_range(config$timeline, policy$forecast_end)
@@ -217,6 +230,13 @@ UITab_OptimalPolicy <- function(id, config) {
       shiny::h4("Graph details"),
       shiny::selectizeInput(ns("response_variables"), "Response variables", choices, multiple = TRUE, selected = intersect(policy$default_response_variables, choices)),
       shiny::h4("Model details"),
+      shiny::selectizeInput(
+        ns("models"),
+        "Model(s):",
+        choices = model_choices,
+        selected = selected_models,
+        multiple = TRUE
+      ),
       shiny::numericInput(ns("lambda"), shiny::tagList("Anticipation Parameter", help_button(ns("help_cd"))), policy$lambda, min = 0, max = 1, step = 0.1),
       shiny::h4("Strategy details"),
       shiny::checkboxGroupInput(
@@ -227,7 +247,7 @@ UITab_OptimalPolicy <- function(id, config) {
       ),
       shiny::selectizeInput(ns("loss_variables"), shiny::tagList("Loss function variables", help_button(ns("help_loss_variables"))), loss_choices, multiple = TRUE, selected = intersect(policy$default_loss_variables, loss_choices)),
       optimal_policy_loss_inputs(ns, config),
-      dashboard_plot_mode_controls(ns, advanced_controls = shiny::tagList(
+      dashboard_plot_mode_controls(ns, plotters = config$plotters, advanced_controls = shiny::tagList(
         shiny::selectInput(
           ns("baseline_name"),
           "Baseline:",
@@ -300,8 +320,22 @@ ServerTab_OptimalPolicy <- function(id, config) {
     dashboard_sync_compatibility_mode(input, session)
     ns <- session$ns
     policy <- config$optimal_policy
-    policy_model <- config$models[[policy$policy_model]]
+    baseline_model <- config$models[[policy$baseline_model]]
     cache <- new.env(parent = emptyenv())
+    selected_models <- shiny::reactive({
+      shiny::req(input$models)
+      config$models[input$models]
+    })
+    responses <- shiny::reactive(optimal_policy_response_choices(selected_models()))
+    shiny::observeEvent(input$models, {
+      shiny::updateSelectizeInput(
+        session,
+        "response_variables",
+        choices = responses(),
+        selected = irf_preserve_selection(input$response_variables, responses()),
+        server = TRUE
+      )
+    }, ignoreInit = TRUE)
     baseline_registry <- shiny::reactiveVal(config$baselines)
     active_baseline_name <- shiny::reactive({
       choices <- names(baseline_registry())
@@ -311,10 +345,14 @@ ServerTab_OptimalPolicy <- function(id, config) {
     active_baseline <- shiny::reactive(baseline_registry()[[active_baseline_name()]])
     prepared_baseline <- shiny::reactive({
       baseline <- active_baseline()
-      baseline <- policy$prepare_baseline(baseline, policy_model, policy)
+      baseline <- policy$prepare_baseline(baseline, baseline_model, policy)
       policy$extend_baseline(baseline, policy)
     })
-    output$message <- shiny::renderUI(NULL)
+    output$message <- shiny::renderUI({
+      notes <- tryCatch(result()$notes, error = function(e) NULL)
+      if (length(notes) == 0) return(NULL)
+      shiny::tags$div(class = "alert alert-warning", role = "alert", lapply(notes, shiny::tags$p))
+    })
     output$active_baseline <- shiny::renderText(active_baseline_name())
     shiny::observeEvent(input$help_cd, {
       shiny::showModal(dash_help_modal(policy$help$cd, "Anticipation parameter"))
@@ -450,39 +488,49 @@ ServerTab_OptimalPolicy <- function(id, config) {
     })
 
     result <- shiny::eventReactive(input$run, {
-      shiny::validate(shiny::need(length(input$response_variables) > 0, "Select at least one response variable."), shiny::need(length(input$strategy_modes) > 0, "Select at least one strategy."))
+      shiny::validate(
+        shiny::need(length(input$models) > 0, "Select at least one model."),
+        shiny::need(length(input$response_variables) > 0, "Select at least one response variable."),
+        shiny::need(length(input$strategy_modes) > 0, "Select at least one strategy.")
+      )
       loss_variables <- input$loss_variables
       targets <- stats::setNames(vapply(loss_variables, function(variable) input[[paste0("target_", optimal_policy_widget_id(variable))]], numeric(1)), loss_variables)
-      baseline <- optimal_policy_add_gaps(prepared_baseline(), loss_variables, targets)
+      baseline <- optimal_policy_add_gaps(prepared_baseline(), loss_variables, targets, baseline_model)
       constraints <- optimal_policy_constraints(input, config)
       strategies <- optimal_policy_strategies(input, constraints, config)
-      run_one <- function(model, strategy, use_cd, lambda) {
-        variables <- unique(c(strategy$output_variables, strategy$loss_variables, vapply(strategy$constraints, `[[`, character(1), "variable"), strategy$instrument_variable))
-        preloss <- if (strategy$commit == "timeless") length(seq(input$preloss_start, policy$forecast_start, by = "quarter")) - 1L else 0L
-        horizon <- max(length(seq(policy$forecast_start, policy$forecast_end, by = "quarter")), strategy$T_loss + preloss)
-        instrument_horizon <- strategy$T_instrument + preloss
-        key <- paste(model$M_$model_name, paste(variables, collapse = "|"), horizon, instrument_horizon, use_cd, lambda, sep = "::")
-        irfs <- if (exists(key, envir = cache, inherits = FALSE)) get(key, envir = cache) else {
-          value <- build_policy_irfs(model, variables, horizon, instrument_horizon, use_cd, lambda, strategy$instrument_shock)
-          assign(key, value, envir = cache)
-          value
-        }
-        get_policy_scenario(strategy, baseline, model, use_cd, lambda, policy$forecast_start, policy$forecast_end, policy$loss_variable_vintages, input$preloss_start, irfs)
-      }
-      scenarios <- lapply(strategies, run_one, model = policy_model, use_cd = policy$use_cd, lambda = input$lambda)
-      data <- dplyr::bind_rows(scenarios)
-      if (!is.null(policy$comparison_model)) {
-        comparison <- config$models[[policy$comparison_model]]
-        reference <- strategies[[1]]
-        reference$commit <- "commit"
-        reference$output_name <- sprintf("Optimal (%s)", policy$comparison_model)
-        data <- dplyr::bind_rows(data, run_one(comparison, reference, FALSE, 0))
-      }
+      # Warnings raised by the calculation (e.g. a model with too few
+      # anticipated shocks) are shown above the graph rather than only on the
+      # R console.
+      notes <- character()
+      data <- tryCatch(
+        withCallingHandlers(
+          get_policy_scenarios(
+            strategies = strategies,
+            models = selected_models(),
+            baseline = baseline,
+            use_cd = policy$use_cd,
+            lambda = input$lambda,
+            forecast_start = policy$forecast_start,
+            forecast_end = policy$forecast_end,
+            loss_variable_vintages = policy$loss_variable_vintages,
+            preloss_start = input$preloss_start,
+            irf_cache = cache
+          ),
+          warning = function(w) {
+            notes <<- c(notes, conditionMessage(w))
+            invokeRestart("muffleWarning")
+          }
+        ),
+        error = function(e) e
+      )
+      failed <- inherits(data, "error")
+      shiny::validate(shiny::need(!failed, if (failed) conditionMessage(data)))
       list(
         data = data,
         baseline = baseline,
         response_variables = input$response_variables,
-        date_range = input$date_range
+        date_range = input$date_range,
+        notes = unique(notes)
       )
     }, ignoreInit = TRUE)
     selected <- shiny::reactive({
@@ -493,23 +541,36 @@ ServerTab_OptimalPolicy <- function(id, config) {
     plotted <- shiny::reactive({
       data <- selected()
       shiny::validate(shiny::need(nrow(data) > 0, "No policy output matches the selected plot range."))
-      plot_pretty(
+      plotter <- dashboard_selected_plotter(input, config$plotters)
+      out <- plot_pretty(
         data,
-        display_names = optimal_policy_response_display_names(policy_model, result()$response_variables),
+        display_names = result()$response_variables,
         title = "Optimal Policy",
         baseline_colour = "royalblue",
         date_range = result()$date_range,
-        plotter = dashboard_selected_plotter(input)
+        plotter = plotter
       )
+      footnotes <- dashboard_response_notes_footnote(data, config$response_notes)
+      if (!is.null(footnotes)) {
+        out$graph <- out$graph + (
+          # ggrba::footnote_rba() expects each distinct footnote as its own
+          # vector element (it numbers each with its own `*`/`**`/... marker);
+          # passing a pre-joined single string would register every note as
+          # one combined footnote instead. ggplot2::labs() only ever takes a
+          # single caption string, so join with newlines there instead.
+          if (plotter == "ggrba") ggrba::footnote_rba(footnotes) else ggplot2::labs(caption = paste(footnotes, collapse = "\n"))
+        )
+      }
+      out
     })
     dashboard_bind_plot_mode(
       output,
       shiny::reactive(plotted()$graph),
       shiny::reactive(isTRUE(input$use_compatibility_plot)),
-      plotter = shiny::reactive(dashboard_selected_plotter(input))
+      plotter = shiny::reactive(dashboard_selected_plotter(input, config$plotters))
     )
     output$table <- shiny::renderTable(plotted()$graph_data, rownames = FALSE)
     output$download_data <- shiny::downloadHandler(filename = function() paste0(plotted()$graph_fname, ".xlsx"), content = function(file) writexl::write_xlsx(plotted()$graph_data, file))
-    output$download_graph <- shiny::downloadHandler(filename = function() paste0(plotted()$graph_fname, ".svg"), content = function(file) ezdyn_ggsave(file, plotted()$graph, plotter = dashboard_selected_plotter(input)))
+    output$download_graph <- shiny::downloadHandler(filename = function() paste0(plotted()$graph_fname, ".svg"), content = function(file) ezdyn_ggsave(file, plotted()$graph, plotter = dashboard_selected_plotter(input, config$plotters)))
   })
 }

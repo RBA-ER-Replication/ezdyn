@@ -1,7 +1,7 @@
 # ezdyn
 
 `ezdyn` is an R package for loading linear dynamic models, calculating impulse
-responses, historical shock decompositions, alternative policy paths, and optimal policy exercises, then
+responses, historical shock decompositions, and alternative policy paths, then
 plotting the results consistently across one or more models.
 
 It works with models exported from Dynare or just a dataframe of impulse responses.

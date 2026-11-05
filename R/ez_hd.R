@@ -49,26 +49,36 @@ hd_matrix_to_df <- function(arr) {
 #' @param interactive Logical; if `TRUE`, return an interactive plotly widget.
 #' @param bar_colours colours for different bars
 #'
+#' @details When `df` carries a `date` column (added by `ez_hd(data_start = ...)`),
+#'   the x-axis plots real calendar quarters via `ggplot2::scale_x_date()`.
+#'   Otherwise it falls back to the raw integer quarter counter `t`, labelled
+#'   "Quarter".
+#'
 #' @return List with `graph`, `graph_data`, and `graph_fname`.
 #' @export
 plot_pretty_hd <- function(df,
-							dynare_names = NULL,
-							display_names = NULL,
-							shocks = NULL,
-							shock_group = NULL,
-							interactive = FALSE,
-							bar_order = NULL,
-							bar_colours = NULL) {
+						dynare_names = NULL,
+						display_names = NULL,
+						shocks = NULL,
+						shock_group = NULL,
+						interactive = FALSE,
+						bar_order = NULL,
+						bar_colours = NULL) {
 
 
 	if (!is.null(dynare_names)) df <- dplyr::filter(df, variable %in% dynare_names)
 	if (!is.null(display_names)) df <- dplyr::filter(df, display_name %in% display_names)
 	if (!is.null(shocks)) df <- dplyr::filter(df, shock %in% shocks)
 
+	has_date <- "date" %in% names(df) && inherits(df$date, "Date") && !anyNA(df$date)
+	id_cols <- c("t", if (has_date) "date", "variable", "display_name", "display_unit", "model_name")
+	export_cols <- c("t", if (has_date) "date", "display_name", "variable", "model_name")
+	x_col <- if (has_date) "date" else "t"
+
 	# TODO: remind myself why I am summing these values, I think it should only be 1 value per group anyway.
     actuals <- df |>
   		dplyr::filter(shock == "smoothed") |>
-  		dplyr::group_by(t, variable, display_name, display_unit, model_name) |>
+  		dplyr::group_by(dplyr::across(dplyr::all_of(id_cols))) |>
   		dplyr::summarise(value = sum(value, na.rm = TRUE), .groups = "drop")
 
 	bars_df <- df |>
@@ -81,8 +91,8 @@ plot_pretty_hd <- function(df,
         dplyr::mutate(shock_group = dplyr::case_when(shock == "residual" ~ "Residual",
                                                      (shock != "residual") & is.na(!!rlang::sym(shock_group)) ~ "Other",
                                                      .default=!!rlang::sym(shock_group))) |>
-            dplyr::group_by(shock_group, t, variable, display_name, display_unit, model_name) |>
-            dplyr::summarise(value = sum(value), shock=unique(shock_group))
+            dplyr::group_by(dplyr::across(dplyr::all_of(c("shock_group", id_cols)))) |>
+            dplyr::summarise(value = sum(value), shock = unique(shock_group))
 
 	}
 
@@ -100,15 +110,15 @@ plot_pretty_hd <- function(df,
 	bars_df <- bars_df |>
 		dplyr::mutate(
 			hover_text = sprintf(
-				"Variable: %s<br>Shock: %s<br>t: %s<br>Value: %.4f",
-				display_name, shock, t, value
+				"Variable: %s<br>Shock: %s<br>%s: %s<br>Value: %.4f",
+				display_name, shock, if (has_date) "Date" else "t", !!rlang::sym(x_col), value
 			)
 		)
 	actuals <- actuals |>
 		dplyr::mutate(
 			hover_text = sprintf(
-				"Variable: %s<br>Series: smoothed<br>t: %s<br>Value: %.4f",
-				display_name, t, value
+				"Variable: %s<br>Series: smoothed<br>%s: %s<br>Value: %.4f",
+				display_name, if (has_date) "Date" else "t", !!rlang::sym(x_col), value
 			)
 		)
 	# Handle shock colours
@@ -121,19 +131,20 @@ plot_pretty_hd <- function(df,
 	}
 
 
-	graph <- ggplot2::ggplot(bars_df, ggplot2::aes(x = t, y = value, fill = shock, text = hover_text)) +
+	graph <- ggplot2::ggplot(bars_df, ggplot2::aes(x = !!rlang::sym(x_col), y = value, fill = shock, text = hover_text)) +
 		ggplot2::geom_hline(yintercept = 0, linewidth = 0.3) +
 		ggplot2::geom_col(position = "stack", alpha = 0.9) +
 		ggplot2::scale_fill_manual(values = bar_colours) +
 		ggplot2::geom_line(
 			data = actuals,
-			mapping = ggplot2::aes(x = t, y = value, group = interaction(display_name, variable, model_name), text = hover_text),
+			mapping = ggplot2::aes(x = !!rlang::sym(x_col), y = value, group = interaction(display_name, variable, model_name), text = hover_text),
 			inherit.aes = FALSE,
 			colour = "black",
 			linewidth = 1
 		) +
+		(if (has_date) ggplot2::scale_x_date(guide = ggplot2::guide_axis(check.overlap = TRUE)) else NULL) +
 		ggplot2::facet_wrap(~display_name, scales = "free_y") +
-		ggplot2::labs(x = "Quarter", y = NULL, fill = "Shock",
+		ggplot2::labs(x = if (has_date) NULL else "Quarter", y = NULL, fill = "Shock",
 		              caption= "'Other' includes any shocks not part of the grouping,
 		              'Residual' contains approximation error from initial conditions.") +
 		ggplot2::theme_classic(base_size = 11 * 1.25)
@@ -158,11 +169,11 @@ plot_pretty_hd <- function(df,
 
 	graph_data <- dplyr::left_join(
 		bars_df |>
-			dplyr::select(t, display_name, variable, model_name, shock, value) |>
+			dplyr::select(dplyr::all_of(export_cols), shock, value) |>
 			tidyr::pivot_wider(names_from = "shock", values_from = "value"),
 		actuals |>
-			dplyr::select(t, display_name, variable, model_name, smoothed_total = value),
-		by = c("t", "display_name", "variable", "model_name")
+			dplyr::select(dplyr::all_of(export_cols), smoothed_total = value),
+		by = export_cols
 	)
 
 	list(graph = graph, graph_data = graph_data, graph_fname = graph_fname)
@@ -183,24 +194,37 @@ plot_pretty_hd <- function(df,
 #'   analogously to `pretty_irf()`.
 #' @param model_name Optional model name override; defaults to `M_$model_name`
 #'   when available.
+#' @param data_start Optional single non-NA `Date` giving the calendar quarter
+#'   that `t == 1` represents (i.e. the first quarter of the smoothed/
+#'   estimation sample - typically a dashboard's `timeline$data_start`, not
+#'   necessarily a model's `oo_$dr` or `M_` fields, which carry no date info).
+#'   When supplied, adds a `date` column (one calendar quarter per increment
+#'   of `t`) so `plot_pretty_hd()` can plot real dates instead of a raw
+#'   integer quarter counter. Omit to keep the existing integer-only output.
 #'
 #' @return A long data frame with at least columns:
 #'   `t`, `shock`, `variable`, `model_name`, `display_name`, `display_unit`, `value`.
 #'   Additional shock metadata columns are added from `M_$shock_meta` if available.
+#'   Includes a `date` column when `data_start` is supplied.
 #' @details TODO: Need to apply rescaling to the shock output.
 #'
 #' @export
 #'
-ez_hd <- function(M_, oo_=NULL, hd_override=NULL, model_name = NULL) {
+ez_hd <- function(M_, oo_=NULL, hd_override=NULL, model_name = NULL, data_start = NULL) {
+  if (!is.null(data_start) &&
+      (!inherits(data_start, "Date") || length(data_start) != 1 || is.na(data_start))) {
+    stop("`data_start` must be a single non-NA Date.", call. = FALSE)
+  }
 
-  if (!is.null(oo_)) {
-    if (is.null(hd_override)) {
-      hd <- get_hd(M_, oo_)
-    } else {
+  if (is.null(hd_override)) {
+    hd <- get_hd(M_, oo_)
+  } else {
+    if (!is.null(oo_)) {
       message("Both oo_ and hd_override are not NULL. Going to use shock decomposition
               output from hd_override, rather than re-generating shock decomposition
               using oo_.")
     }
+    hd <- hd_override
   }
   # Convert output from get_hd (or MATLAB output) into a nice tidy df with
   # variable/shock display names/units.
@@ -246,7 +270,17 @@ ez_hd <- function(M_, oo_=NULL, hd_override=NULL, model_name = NULL) {
 		  dplyr::mutate(description = shock)
 	}
 
-	core_cols <- c("t", "shock", "variable", "model_name", "display_name", "display_unit", "value")
+	# Map the integer quarter counter `t` (1, 2, 3, ...) onto real calendar
+	# quarters starting at `data_start`, so plot_pretty_hd() can draw a date
+	# x-axis. `t` values are assumed to be a 1-indexed consecutive quarter
+	# counter, as produced by get_hd()/hd_matrix_to_df().
+	if (!is.null(data_start)) {
+		t_levels <- sort(unique(out$t))
+		quarter_dates <- seq(data_start, by = "quarter", length.out = length(t_levels))
+		out$date <- quarter_dates[match(out$t, t_levels)]
+	}
+
+	core_cols <- c("t", if (!is.null(data_start)) "date", "shock", "variable", "model_name", "display_name", "display_unit", "value")
 	extra_cols <- setdiff(names(out), core_cols)
 	out <- out[, c(core_cols, extra_cols), drop = FALSE]
 

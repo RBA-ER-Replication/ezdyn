@@ -22,6 +22,33 @@ hsd_selected_values <- function(preferred, choices) {
   if (length(selected) > 0) selected else utils::head(choices, 1)
 }
 
+#' Return the shock-grouping value to select for the "Shock grouping:" input.
+#'
+#' Prefers `current` (the existing selection, if still valid for `choices` -
+#' used when the available models/groupings change mid-session), then
+#' `configured_default` (`config$hsd$shock_group`), then the first real
+#' (non-"None") available grouping, so a dashboard that leaves `shock_group`
+#' unconfigured still starts on a meaningful grouping rather than silently
+#' falling back to "None".
+#'
+#' @param current Current selection, or `NULL`/`NA` if there isn't one yet.
+#' @param configured_default Configured preferred grouping, or `NULL`.
+#' @param choices Named vector of available grouping choices, including a
+#'   leading `"None" = ""` entry.
+#'
+#' @return One grouping value from `choices` (possibly `""` for "None").
+hsd_selected_shock_group <- function(current, configured_default, choices) {
+  values <- unname(choices)
+  if (!is.null(current) && !is.na(current) && current %in% values) {
+    return(current)
+  }
+  if (!is.null(configured_default) && configured_default %in% values) {
+    return(configured_default)
+  }
+  non_none <- setdiff(values, "")
+  if (length(non_none) > 0) non_none[[1]] else ""
+}
+
 #' Build the namespaced historical shock-decomposition tab UI.
 #'
 #' @param id Module namespace.
@@ -38,12 +65,7 @@ UITab_HistShockDecomp <- function(id, config) {
   selected_variables <- hsd_selected_values(config$hsd$display_names, initial_variables)
   initial_groups <- ez_hd.available_shock_groupings(config$models[[initial_model]]$M_)
   initial_groups <- c("None" = "", hsd_choices(initial_groups))
-  selected_group <- if (!is.null(config$hsd$shock_group) &&
-                        config$hsd$shock_group %in% unname(initial_groups)) {
-    config$hsd$shock_group
-  } else {
-    "All shocks"
-  }
+  selected_group <- hsd_selected_shock_group(NULL, config$hsd$shock_group, initial_groups)
   preamble <- if (is.function(config$hsd$preamble_ui)) config$hsd$preamble_ui() else NULL
 
   shiny::sidebarLayout(
@@ -120,13 +142,13 @@ ServerTab_HistShockDecomp <- function(id, config) {
     }, ignoreInit = TRUE)
     shiny::observeEvent(shock_group_choices(), {
       choices <- shock_group_choices()
-      selected <- if (input$shock_group %in% unname(choices)) input$shock_group else ""
+      selected <- hsd_selected_shock_group(input$shock_group, config$hsd$shock_group, choices)
       shiny::updateSelectInput(session, "shock_group", choices = choices, selected = selected)
     }, ignoreInit = TRUE)
 
     hsd <- shiny::reactive({
       model <- selected_model()
-      ez_hd(model$M_, model$oo_, model_name = input$model)
+      ez_hd(model$M_, model$oo_, model_name = input$model, data_start = config$timeline$hsd_data_start)
     })
     plot <- shiny::reactive({
       shiny::req(input$display_names)

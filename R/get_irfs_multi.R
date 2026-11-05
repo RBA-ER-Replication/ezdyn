@@ -102,7 +102,9 @@ get_irfs <- function(models, shock_names, horizon, pretty = TRUE, data_frame = p
 #' @param horizon Horizon to calculate impulse responses over.
 #' @param target Named list of target paths, as in [get_irf_target()]. Names
 #'   are resolved independently for every model using that model's own
-#'   variable metadata.
+#'   variable metadata, and may be given in any order. Entries may differ in
+#'   length: shorter entries are auto-padded with trailing `NA`
+#'   (unconstrained) up to the length of the longest entry.
 #' @param shock_timing Named list mapping shocks to the periods they are
 #'   active, as in [get_irf_target()]. Names are resolved independently for
 #'   every model using that model's own shock metadata.

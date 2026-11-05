@@ -42,6 +42,14 @@ dashboard_is_quarter_date <- function(date) {
 }
 
 # Validate the timeline shared by dashboard modules.
+#
+# `hsd_data_start` is an optional extra field (not in `required_dates`): the
+# calendar quarter that `t == 1` represents in the Historical Shock
+# Decomposition tab (see `ez_hd()`'s `data_start` argument). It defaults to
+# `data_start` so existing dashboards keep their current behaviour, but can
+# be set separately since it must match a model's true smoothed-estimation-
+# sample start, which need not coincide with `data_start` (the baseline/
+# Alt Paths display and coverage floor).
 dashboard_validate_timeline <- function(timeline) {
   required_dates <- c("data_start", "data_end", "forecast_start", "forecast_end")
   if (!is.list(timeline) || !all(required_dates %in% names(timeline))) {
@@ -51,7 +59,9 @@ dashboard_validate_timeline <- function(timeline) {
     )
   }
 
-  timeline <- timeline[required_dates]
+  timeline$hsd_data_start <- dashboard_or_default(timeline$hsd_data_start, timeline$data_start)
+  all_dates <- c(required_dates, "hsd_data_start")
+  timeline <- timeline[all_dates]
   if (!all(vapply(timeline, dashboard_is_quarter_date, logical(1)))) {
     stop("Timeline dates must be first-day quarterly Date values.", call. = FALSE)
   }
@@ -172,6 +182,8 @@ dashboard_validate_irf_config <- function(irf, models) {
   defaults$display_names <- dashboard_or_default(defaults$display_names, "Trimmed Mean Inflation (ye)")
   defaults$use_cd <- dashboard_or_default(defaults$use_cd, FALSE)
   defaults$lambda <- dashboard_or_default(defaults$lambda, 0)
+  defaults$shock <- dashboard_or_default(defaults$shock, NULL)
+  defaults$target_display_name <- dashboard_or_default(defaults$target_display_name, NULL)
 
   if (!is.numeric(defaults$horizon) || length(defaults$horizon) != 1 ||
       is.na(defaults$horizon) || defaults$horizon < 1 || defaults$horizon %% 1 != 0) {
@@ -185,6 +197,15 @@ dashboard_validate_irf_config <- function(irf, models) {
       !is.numeric(defaults$lambda) || length(defaults$lambda) != 1 ||
       is.na(defaults$lambda) || defaults$lambda < 0 || defaults$lambda > 1) {
     stop("`irf$defaults` contains invalid display, CD, or lambda settings.", call. = FALSE)
+  }
+  if (!is.null(defaults$shock) &&
+      (!is.character(defaults$shock) || length(defaults$shock) != 1 || is.na(defaults$shock))) {
+    stop("`irf$defaults$shock` must be one character shock description when supplied.", call. = FALSE)
+  }
+  if (!is.null(defaults$target_display_name) &&
+      (!is.character(defaults$target_display_name) || length(defaults$target_display_name) != 1 ||
+       is.na(defaults$target_display_name))) {
+    stop("`irf$defaults$target_display_name` must be one character display name when supplied.", call. = FALSE)
   }
 
   list(scenarios = scenarios, defaults = defaults)
@@ -250,6 +271,40 @@ dashboard_validate_hsd_config <- function(hsd, models) {
   }
 
   hsd
+}
+
+# Validate the optional Response Notes footnote configuration: reviewed
+# caveats shown as a plot footnote in the IRF Library and Alternative Policy
+# Paths tabs whenever the named model (and, if given, the named response
+# variable) appears in the plotted data. `display_name` is optional - `NA`
+# (the default when omitted) applies the note whenever the model appears at
+# all, regardless of variable; naming a `display_name` scopes the note to
+# one response variable within that model. This lets composition roots (e.g.
+# dingo_dashboard.R) attach model-specific or variable-specific caveats ("X is
+# a linearised approximation", "Y is derived via Okun's law") without any
+# model- or variable-name branching in generic dashboard code.
+dashboard_validate_response_notes <- function(response_notes, models) {
+  empty <- data.frame(model_name = character(), display_name = character(), note = character(), stringsAsFactors = FALSE)
+  if (is.null(response_notes)) {
+    return(empty)
+  }
+  required_columns <- c("model_name", "note")
+  if (!is.data.frame(response_notes) || !all(required_columns %in% names(response_notes))) {
+    stop("`response_notes` must be a data frame containing `model_name` and `note`.", call. = FALSE)
+  }
+  if (nrow(response_notes) == 0) {
+    return(empty)
+  }
+  if (!("display_name" %in% names(response_notes))) {
+    response_notes$display_name <- NA_character_
+  }
+  if (anyNA(response_notes$model_name) || any(response_notes$model_name == "") ||
+      !all(response_notes$model_name %in% names(models)) ||
+      anyNA(response_notes$note) || any(response_notes$note == "")) {
+    stop("`response_notes` must have non-empty `model_name` values naming configured models and non-empty `note` values.", call. = FALSE)
+  }
+
+  response_notes[c("model_name", "display_name", "note")]
 }
 
 # Validate the optional Alternative Policy Paths module-selection configuration.
@@ -389,15 +444,36 @@ dashboard_validate_optimal_policy_config <- function(optimal_policy, models, tim
   }
   if (!enabled) return(list(enabled = FALSE))
 
-  policy_model <- dashboard_or_default(optimal_policy$policy_model, names(models)[[1]])
-  comparison_model <- dashboard_or_default(optimal_policy$comparison_model, NULL)
+  optimal_policy$models <- dashboard_or_default(optimal_policy$models, names(models))
+  if (!is.character(optimal_policy$models) || length(optimal_policy$models) == 0 ||
+      anyNA(optimal_policy$models) || any(optimal_policy$models == "") || anyDuplicated(optimal_policy$models) ||
+      !all(optimal_policy$models %in% names(models))) {
+    stop("`optimal_policy$models` must contain unique configured model labels.", call. = FALSE)
+  }
+  policy_defaults <- optimal_policy$defaults
+  if (is.null(policy_defaults)) {
+    policy_defaults <- list()
+  }
+  if (!is.list(policy_defaults)) {
+    stop("`optimal_policy$defaults` must be a list.", call. = FALSE)
+  }
+  policy_defaults$models <- dashboard_or_default(policy_defaults$models, optimal_policy$models)
+  if (!is.character(policy_defaults$models) || length(policy_defaults$models) == 0 ||
+      anyNA(policy_defaults$models) || any(policy_defaults$models == "") || anyDuplicated(policy_defaults$models) ||
+      !all(policy_defaults$models %in% optimal_policy$models)) {
+    stop("`optimal_policy$defaults$models` must contain eligible Optimal Policy model labels.", call. = FALSE)
+  }
+  baseline_model <- dashboard_or_default(optimal_policy$baseline_model, optimal_policy$models[[1]])
+  if (!is.character(baseline_model) || length(baseline_model) != 1 || !(baseline_model %in% optimal_policy$models)) {
+    stop("`optimal_policy$baseline_model` must be one eligible Optimal Policy model label.", call. = FALSE)
+  }
   forecast_end <- dashboard_or_default(optimal_policy$forecast_end, NULL)
   preloss_start <- dashboard_or_default(optimal_policy$preloss_start, timeline$forecast_start)
   instrument_variable <- dashboard_or_default(optimal_policy$instrument_variable, "r_obs")
   instrument_shock <- dashboard_or_default(optimal_policy$instrument_shock, "eps_r")
   use_cd <- dashboard_or_default(optimal_policy$use_cd, FALSE)
   lambda <- dashboard_or_default(optimal_policy$lambda, 0)
-  prepare_baseline <- dashboard_or_default(optimal_policy$prepare_baseline, identity)
+  prepare_baseline <- dashboard_or_default(optimal_policy$prepare_baseline, function(baseline, model, policy_config) baseline)
   extend_baseline <- dashboard_or_default(optimal_policy$extend_baseline, function(baseline, policy_config) baseline)
   loss_variable_vintages <- dashboard_or_default(optimal_policy$loss_variable_vintages, NULL)
   loss_variable_choices <- dashboard_or_default(optimal_policy$loss_variable_choices, NULL)
@@ -419,9 +495,7 @@ dashboard_validate_optimal_policy_config <- function(optimal_policy, models, tim
     "optimal_policy$loss_variable_weight_defaults"
   )
 
-  if (!is.character(policy_model) || length(policy_model) != 1 || !(policy_model %in% names(models)) ||
-      (!is.null(comparison_model) && (!is.character(comparison_model) || length(comparison_model) != 1 || !(comparison_model %in% names(models)))) ||
-      !dashboard_is_quarter_date(forecast_end) || forecast_end < timeline$forecast_start ||
+  if (!dashboard_is_quarter_date(forecast_end) || forecast_end < timeline$forecast_start ||
       !dashboard_is_quarter_date(preloss_start) || preloss_start > timeline$forecast_start ||
       !is.character(instrument_variable) || length(instrument_variable) != 1 || instrument_variable == "" ||
       !is.character(instrument_shock) || length(instrument_shock) != 1 || instrument_shock == "" ||
@@ -439,8 +513,9 @@ dashboard_validate_optimal_policy_config <- function(optimal_policy, models, tim
 
   list(
     enabled = TRUE,
-    policy_model = policy_model,
-    comparison_model = comparison_model,
+    models = optimal_policy$models,
+    defaults = policy_defaults,
+    baseline_model = baseline_model,
     forecast_start = timeline$forecast_start,
     forecast_end = forecast_end,
     preloss_start = preloss_start,
@@ -475,6 +550,23 @@ dashboard_validate_startup_modal <- function(startup_modal) {
   startup_modal
 }
 
+# Validate the configured allow-list of plotting backends. Explicit and
+# static - not detected from installed packages - so deployments control
+# exactly which backends are offered regardless of what happens to be
+# installed on the server.
+dashboard_validate_plotters <- function(plotters) {
+  allowed <- c("ggrba", "ggplot")
+  if (!is.character(plotters) || length(plotters) == 0 ||
+      anyNA(plotters) || anyDuplicated(plotters) || !all(plotters %in% allowed)) {
+    stop(
+      sprintf("`plotters` must be a unique, non-empty subset of %s.", paste(sprintf("`%s`", allowed), collapse = ", ")),
+      call. = FALSE
+    )
+  }
+
+  plotters
+}
+
 #' Create and validate a configuration for an ezdyn dashboard.
 #'
 #' This constructor only validates supplied objects. It does not read files,
@@ -483,7 +575,11 @@ dashboard_validate_startup_modal <- function(startup_modal) {
 #' @param name Dashboard title.
 #' @param models Named list of full Dynare or custom-MOO pairs.
 #' @param timeline Named list containing quarterly Date values `data_start`,
-#'   `data_end`, `forecast_start`, and `forecast_end`.
+#'   `data_end`, `forecast_start`, and `forecast_end`. Optionally also
+#'   `hsd_data_start`, the calendar quarter that `t == 1` represents in the
+#'   Historical Shock Decomposition tab (passed to `ez_hd()`'s `data_start`);
+#'   defaults to `data_start` when omitted. Set it explicitly when a model's
+#'   true smoothed-estimation-sample start differs from `data_start`.
 #' @param baselines Named list of canonical `ezdyn_baseline` objects.
 #' @param default_baseline Name of the baseline selected initially.
 #' @param instrument_display_name Display name of the policy instrument.
@@ -512,6 +608,12 @@ dashboard_validate_startup_modal <- function(startup_modal) {
 #'   `dictionary$models` is the eligible model allow-list offered by the tab's
 #'   model selector (defaults to every configured model); `dictionary$defaults$models`
 #'   is the selector's initial selection (defaults to every eligible model).
+#' @param response_notes Optional data frame of reviewed footnote caveats shown
+#'   in the IRF Library and Alternative Policy Paths tabs, with columns
+#'   `model_name` (a configured model label), `note` (the footnote text), and
+#'   optionally `display_name` (a response variable's display name; `NA` or
+#'   omitted applies the note whenever that model appears at all). `NULL`
+#'   (the default) shows no response-note footnotes.
 #' @param optimal_policy Optional policy-module configuration. When enabled,
 #'   supplies model roles, a separate policy horizon, explicit instrument codes,
 #'   baseline preparation/extension functions, timeless-policy vintages, and
@@ -530,6 +632,16 @@ dashboard_validate_startup_modal <- function(startup_modal) {
 #'   fallback modal is shown when unset.
 #' @param startup_modal Optional UI returned by [shiny::modalDialog()] to show
 #'   once when a session starts.
+#' @param plotters Character vector naming the plotting backends this
+#'   dashboard offers, from `c("ggrba", "ggplot")`. Explicit and static - not
+#'   detected from installed packages - so a deployment controls exactly
+#'   which backends are offered regardless of what happens to be installed
+#'   on the server. The "Plot style" control is shown only when more than one
+#'   backend is configured; `"ggrba"` is preselected when both are available.
+#'   Defaults to `"ggplot"` only, so the dashboard - and `ezdyn` generally -
+#'   keeps working without the optional, internal-only `ggrba` package in a
+#'   more public context. Supply `c("ggrba", "ggplot")` for a deployment that
+#'   should also offer RBA-styled charts.
 #'
 #' @return An object of class `ezdyn_dashboard_config`.
 #'
@@ -553,9 +665,11 @@ configure_dashboard <- function(
     hsd = list(),
     alt_paths = list(),
     dictionary = list(),
+    response_notes = NULL,
     optimal_policy = NULL,
     help = list(),
-    startup_modal = NULL) {
+    startup_modal = NULL,
+    plotters = "ggplot") {
   if (!is.character(name) || length(name) != 1 || is.na(name) || name == "") {
     stop("`name` must be one non-empty character value.", call. = FALSE)
   }
@@ -612,9 +726,11 @@ configure_dashboard <- function(
     hsd = dashboard_validate_hsd_config(hsd, models),
     alt_paths = dashboard_validate_alt_paths_config(alt_paths, models),
     dictionary = dashboard_validate_dictionary_config(dictionary, models),
+    response_notes = dashboard_validate_response_notes(response_notes, models),
     optimal_policy = dashboard_validate_optimal_policy_config(optimal_policy, models, timeline),
     help = dashboard_validate_help_config(help),
-    startup_modal = dashboard_validate_startup_modal(startup_modal)
+    startup_modal = dashboard_validate_startup_modal(startup_modal),
+    plotters = dashboard_validate_plotters(plotters)
   )
   class(config) <- c("ezdyn_dashboard_config", "list")
   config

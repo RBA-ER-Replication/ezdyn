@@ -41,6 +41,9 @@ repack <- function(obj) {
 #' @param colour Optional colour used for this model's lines in [plot_pretty()]/
 #'   [plot_pretty_graph()] (e.g. alternative-path or optimal-policy comparisons).
 #'   `NULL` (default) leaves the model in the automatic dynamic palette.
+#' @param remove_vars Optional character vector of regular expressions,
+#'   applied via [remove_endo_vars()] to prune matching endogenous variables
+#'   from the model once built (`NULL`, the default, removes nothing).
 #'
 #' @return A full MOO pair of class `dynare`, containing `oo_` and `M_`.
 #' @export
@@ -48,7 +51,7 @@ repack <- function(obj) {
 #' \dontrun{
 #' read_dynare("solved_model.json", "varmeta.xlsx", model_name = "DINGO")
 #' }
-read_dynare <- function(path, path_meta=NULL, model_name=NULL, colour=NULL) {
+read_dynare <- function(path, path_meta=NULL, model_name=NULL, colour=NULL, remove_vars=NULL) {
     ezdyn_validate_model_colour(colour)
     file_ext <- tools::file_ext(path)
     if (file_ext == "json") {
@@ -106,11 +109,24 @@ read_dynare <- function(path, path_meta=NULL, model_name=NULL, colour=NULL) {
 
     M_$model_name <- model_name
     M_$model_colour <- colour
+    # Precompute the adjusted decision-rule matrices (A: response to lagged
+    # state variables, B: response to structural shocks) once here, instead
+    # of re-deriving them from the raw `oo_$dr$ghx`/`ghu`/`order_var`/`kstate`
+    # fields on every `get_irf()`/`get_hd()` call. Skipped (left NULL) if the
+    # model was never solved (no `oo_$dr$ghx`), matching prior behaviour.
+    if (!is.null(oo_$dr$ghx)) {
+        dr_matrices <- get_dr_matrices(M_, oo_, adjusted = TRUE)
+        oo_$dr$A <- dr_matrices$A
+        oo_$dr$B <- dr_matrices$B
+    }
     oo_$.irf_cache <- new.env(parent = emptyenv()) # Backing store for get_ir_matrix()/get_ir_matrix_gabaix() caching.
     class(M_) <-"dynare" # Specify the type of the M_ object as dynare, as opposed to
     class(oo_) <-"dynare"
 
     model <- list(oo_ = oo_, M_ = M_)
     class(model) <- "dynare"
+    if (!is.null(remove_vars)) {
+        model <- remove_endo_vars(model, remove_vars)
+    }
     model
 }

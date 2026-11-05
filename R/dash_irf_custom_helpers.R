@@ -130,11 +130,28 @@ irf_shock_selector <- function(models) {
 #' Return the preferred one-shock-per-model custom-IRF selection.
 #'
 #' @param selector Value returned by [irf_shock_selector()].
+#' @param preferred_display_name Optional shock description/display name to
+#'   prefer, e.g. a dashboard-configured default. Used only when it identifies
+#'   a shock common to every selected model; otherwise ignored.
 #'
 #' @return Character vector of selector values.
-irf_default_shock_selection <- function(selector) {
+irf_default_shock_selection <- function(selector, preferred_display_name = NULL) {
   if (nrow(selector$map) == 0) {
     return(character())
+  }
+  if (!is.null(preferred_display_name)) {
+    # `irf_model_shock_labels()` title-cases every shock description for
+    # display - normalize the same way so a configured default matches
+    # regardless of the case used in the dashboard composition (e.g. a value
+    # shared with `instrument_shock_name`, which is not title-cased).
+    preferred_label <- tools::toTitleCase(tolower(preferred_display_name))
+    preferred_selection <- selector$map$selection[
+      startsWith(selector$map$selection, "common::") &
+        selector$map$display_name == preferred_label
+    ]
+    if (length(preferred_selection) > 0) {
+      return(preferred_selection[[1]])
+    }
   }
   common_selection <- selector$map$selection[
     startsWith(selector$map$selection, "common::")
@@ -152,12 +169,14 @@ irf_default_shock_selection <- function(selector) {
 #'
 #' @param current Current selector values.
 #' @param selector Value returned by [irf_shock_selector()].
+#' @param preferred_display_name Optional shock description/display name to
+#'   prefer when falling back to a default (see [irf_default_shock_selection()]).
 #'
 #' @return Character vector of selector values.
-irf_preserve_shock_selection <- function(current, selector) {
+irf_preserve_shock_selection <- function(current, selector, preferred_display_name = NULL) {
   selected <- intersect(current, selector$values)
   resolved <- irf_resolve_model_shocks(selector, selected)
-  if (isTRUE(resolved$valid)) selected else irf_default_shock_selection(selector)
+  if (isTRUE(resolved$valid)) selected else irf_default_shock_selection(selector, preferred_display_name)
 }
 
 #' Resolve grouped choices to one native shock code for each selected model.
@@ -226,6 +245,43 @@ irf_shock_description <- function(shock_display_names) {
 #' @return One logical value.
 irf_model_has_displayed_shock <- function(model) {
   length(irf_model_shock_labels(model)) > 0
+}
+
+#' Return metadata-backed, non-derived display names provided by a model pair.
+#'
+#' Unlike [irf_model_display_names()], excludes metadata-declared derived
+#' variables (a non-blank `derived_from`). Custom IRF's target-variable
+#' calibration (`irf_run_targeted()`/`get_irf_target()`) solves directly
+#' against the model's native IRF matrix, which has no derived-variable
+#' support - only native response variables can be used as a calibration
+#' target.
+#'
+#' @param model A Dynare or custom-MOO pair.
+#'
+#' @return Character vector of display names.
+irf_model_target_display_names <- function(model) {
+  metadata <- model$M_$varmeta
+  if (is.null(metadata) || !all(c("dynare_name", "display_name") %in% names(metadata))) {
+    return(character())
+  }
+
+  response_names <- irf_model_responses(model)
+  derived <- !is.na(metadata$derived_from) & nzchar(metadata$derived_from)
+  rows <- metadata$dynare_name %in% response_names & !derived
+  irf_choices(metadata$display_name[rows]) |>
+    unname()
+}
+
+#' Return target-variable choices common to selected models, for Custom IRF's
+#' calibration target selector.
+#'
+#' @param models Named list of selected model pairs.
+#'
+#' @return List with named `choices` and flat `values` (see
+#'   [irf_response_choices()]).
+irf_target_choices <- function(models) {
+  named <- irf_common_choices(models, irf_model_target_display_names)
+  list(choices = named, values = unname(named))
 }
 
 #' Return enabled IRF mode choices for a dashboard configuration.

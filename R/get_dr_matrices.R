@@ -3,7 +3,19 @@
 #' @param oo_ Dynare output structure containing simulation results. 
 #' @param adjusted whether to adjust or otherwise return the raw matrices from dynare. 
 #' Adjustment implies reordering A and B, as well as restricting A to only contain state variables.
+#' @details
+#' When `adjusted = TRUE` and `read_dynare()` has already precomputed
+#' `oo_$dr$A`/`oo_$dr$B` (same shape as this function's own output), those are
+#' returned directly instead of re-deriving them from the raw
+#' `oo_$dr$ghx`/`ghu`/`order_var`/`kstate` fields - a guarded sanity check
+#' (`nrow(oo_$dr$A) == M_$endo_nbr`) falls back to a fresh recomputation if
+#' they look stale/inconsistent (e.g. `oo_$dr$ghx` was mutated directly
+#' without updating `oo_$dr$A`/`B` to match).
 get_dr_matrices <- function(M_, oo_, adjusted=TRUE) {
+    if (adjusted && !is.null(oo_$dr$A) && !is.null(oo_$dr$B) &&
+            nrow(oo_$dr$A) == as.numeric(M_$endo_nbr)) {
+        return(list(A = oo_$dr$A, B = oo_$dr$B))
+    }
     A = oo_$dr$ghx # Response to lagged variables
     B = oo_$dr$ghu # Response to structural shocks
     

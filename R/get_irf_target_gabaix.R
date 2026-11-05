@@ -8,7 +8,11 @@
 #' @param oo_ Dynare output structure containing simulation results.
 #' @param horizon Horizon to calculate impulse responses over.
 #' @param target Named list of target paths with `NA` for unconstrained periods.
-#'   Names can be variable 'display_name's from variable metadata or 'dynare_names'.
+#'   Names can be variable 'display_name's from variable metadata or
+#'   'dynare_names', in any order - the key order of `target` need not match
+#'   the model's internal variable order. Entries may differ in length:
+#'   shorter entries are auto-padded with trailing `NA` up to the length of
+#'   the longest entry.
 #' @param shock_timing Named list mapping shocks to the periods they are active.
 #'   Names can be shock descriptions from shock metadata or the standard shock codes.
 #' For example, `list("eps_r" = 1:4)` or `list("Cash rate shock" = 1:4)`, depending on the shock metadata.
@@ -46,13 +50,15 @@ get_irf_target_gabaix <- function(M_, oo_, horizon,
         flatten_target()
 
     # Construct IRF
-    t_max_target <- as.data.frame(target) |> 
-        nrow()
+    t_max_target <- max(lengths(target))
     T_ <- max(c(t_max_target, horizon))
     T_shock <- max(unlist(shock_timing))
     shock_name <- names(shock_timing)
 
     Mh <- get_ir_matrix_gabaix(M_, oo_, T_, shock_name, T_shock, lambda, cache = cache)
+    # Target variables must be natively solved by the model - metadata-derived
+    # variables (e.g. year-ended inflation) have no row in this raw matrix.
+    ezdyn_validate_native_target_names(names(target), dimnames(Mh$Mh_total)[[1]], M_)
 
     Mh_total <- Mh$Mh_total[drop=F,,,,unlist(shock_timing)]
     Mh_marginal <- Mh$Mh_marginal[drop=F,,,unlist(shock_timing),]

@@ -45,16 +45,23 @@ render_rbaplot <- function(plt, file_ext = ".png", plotter = NULL) {
 #' Resolve the dashboard's selected plotting backend.
 #'
 #' Reads the plot-style control added by [dashboard_plot_mode_controls()]. The
-#' control is absent when the optional ggrba package is not installed, in
-#' which case `input[[plotter_input]]` is `NULL` and this falls back to
-#' `"ggplot"` via [ezdyn_resolve_plotter()].
+#' control is absent when only one backend is configured, in which case
+#' `input[[plotter_input]]` is `NULL` and this returns the configured backend
+#' (`"ggrba"` when it is one of `plotters`, otherwise the first configured
+#' value).
 #'
 #' @param input Shiny input object for the current module.
+#' @param plotters Character vector of configured backends, e.g.
+#'   `config$plotters` from [configure_dashboard()].
 #' @param plotter_input Input identifier for the plot-style control.
 #'
 #' @return `"ggrba"` or `"ggplot"`.
-dashboard_selected_plotter <- function(input, plotter_input = "plotter") {
-  ezdyn_resolve_plotter(input[[plotter_input]])
+dashboard_selected_plotter <- function(input, plotters = "ggplot", plotter_input = "plotter") {
+  selected <- input[[plotter_input]]
+  if (!is.null(selected)) {
+    return(selected)
+  }
+  if ("ggrba" %in% plotters) "ggrba" else plotters[[1]]
 }
 
 #' Sync plot compatibility mode to the selected plotting backend.
@@ -86,21 +93,25 @@ dashboard_sync_compatibility_mode <- function(
 #' direct Shiny rendering for deployments that require separated plot panels.
 #'
 #' @param ns A Shiny namespace function.
+#' @param plotters Character vector of configured backends, e.g.
+#'   `config$plotters` from [configure_dashboard()]. The "Plot style" control
+#'   is shown only when more than one backend is configured, since there is
+#'   otherwise only one available choice.
 #' @param advanced_input Input identifier for the Advanced Options switch.
 #' @param compatibility_input Input identifier for the renderer checkbox.
-#' @param plotter_input Input identifier for the plot-style control. Hidden
-#'   entirely when the optional ggrba package is not installed, since there is
-#'   then only one available backend.
+#' @param plotter_input Input identifier for the plot-style control.
 #' @param advanced_controls Optional module-specific controls shown alongside
 #'   the renderer checkbox when Advanced options is enabled.
 #'
 #' @return Shiny UI.
 dashboard_plot_mode_controls <- function(
     ns,
+    plotters = "ggplot",
     advanced_input = "show_plot_advanced_options",
     compatibility_input = "use_compatibility_plot",
     plotter_input = "plotter",
     advanced_controls = NULL) {
+  plotter_labels <- c(ggrba = "RBA style", ggplot = "ggplot2")
   shiny::tagList(
     shinyWidgets::prettySwitch(
       ns(advanced_input),
@@ -115,18 +126,61 @@ dashboard_plot_mode_controls <- function(
         "Plot compatibility mode",
         value = FALSE
       ),
-      if (requireNamespace("ggrba", quietly = TRUE)) {
+      if (length(plotters) > 1) {
         shiny::radioButtons(
           ns(plotter_input),
           "Plot style:",
-          choices = c("RBA style" = "ggrba", "ggplot2" = "ggplot"),
-          selected = "ggrba",
+          choices = stats::setNames(plotters, plotter_labels[plotters]),
+          selected = if ("ggrba" %in% plotters) "ggrba" else plotters[[1]],
           inline = TRUE
         )
       },
       advanced_controls
     )
   )
+}
+
+#' Return the distinct configured response-note caveats that apply to the
+#' models/variables actually present in a plotted data frame.
+#'
+#' Matches each `response_notes` row by `model_name` (always) and, when that
+#' row's `display_name` is non-NA, also by `display_name` - so a single
+#' configuration mechanism covers both a whole-model caveat (e.g. "this model
+#' is a linearised approximation") and a one-variable caveat (e.g. one
+#' variable derived via a particular economic relationship), without any
+#' model- or variable-name branching in this generic helper.
+#'
+#' Returns one element per distinct applicable note - never pre-joined into a
+#' single string - since `ggrba::footnote_rba()` expects each footnote as its
+#' own vector element (it numbers each with its own `*`/`**`/... marker via
+#' `construct_caption()`); joining multiple notes into one string beforehand
+#' would register them as a single numbered footnote instead. Callers
+#' targeting `ggplot2::labs(caption = ...)` (a single string) should
+#' `paste(..., collapse = "\n")` the result themselves.
+#'
+#' @param data Plotted long data frame with `model_name` and `display_name` columns.
+#' @param response_notes Validated `response_notes` data frame from
+#'   `configure_dashboard()` (`config$response_notes`).
+#'
+#' @return A character vector of distinct applicable notes, or `NULL` if none apply.
+dashboard_response_notes_footnote <- function(data, response_notes) {
+  if (is.null(response_notes) || nrow(response_notes) == 0 ||
+      !is.data.frame(data) || !all(c("model_name", "display_name") %in% names(data))) {
+    return(NULL)
+  }
+
+  applies <- vapply(seq_len(nrow(response_notes)), function(i) {
+    rule <- response_notes[i, ]
+    model_rows <- data$model_name %in% rule$model_name
+    if (is.na(rule$display_name)) {
+      any(model_rows)
+    } else {
+      any(model_rows & data$display_name %in% rule$display_name)
+    }
+  }, logical(1))
+
+  notes <- unique(response_notes$note[applies])
+  if (length(notes) == 0) NULL else notes
 }
 
 #' Build dashboard plot outputs with direct and compatibility renderers.

@@ -222,6 +222,28 @@ ezdyn_line_label_colours <- function(df) {
 	stats::setNames(lookup$model_colour, lookup$line_label)
 }
 
+# Give distinct linetypes to line labels that end up sharing the SAME final
+# colour (typically two or more strategies/paths for one model, whose colour
+# is pinned via `model_colour` - e.g. DINGO's optimal commitment and
+# discretion paths). Labels with a colour unique to them (including
+# Baseline) keep a solid line, so this is a no-op unless a collision exists.
+# Grouping is alphabetical by label, so e.g. "commitment" sorts before
+# "discretion" and gets the first (solid) linetype.
+ezdyn_line_label_linetypes <- function(colour_values, baseline_name) {
+	linetype_cycle <- c("solid", "dashed", "dotted", "dotdash", "longdash", "twodash")
+	other_labels <- sort(setdiff(names(colour_values), baseline_name))
+	linetypes <- stats::setNames(rep_len("solid", length(other_labels)), other_labels)
+	for (group in split(other_labels, colour_values[other_labels])) {
+		if (length(group) > 1) {
+			linetypes[group] <- rep_len(linetype_cycle, length(group))
+		}
+	}
+	if (baseline_name %in% names(colour_values)) {
+		linetypes <- c(stats::setNames("solid", baseline_name), linetypes)
+	}
+	linetypes[names(colour_values)]
+}
+
 # Omit overlapping Date labels at the rendered width.
 ezdyn_alt_path_date_scale <- function() {
 	ggplot2::scale_x_date(
@@ -314,12 +336,13 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 			(if (is_alt_path) ezdyn_alt_path_date_scale() else ggplot2::geom_hline(yintercept = 0)) +
 			ggplot2::scale_y_continuous(breaks = y_breaks_common) +
 			ggplot2::labs(x = if (is_alt_path) NULL else "Quarter") +
-			ggplot2::theme_classic(base_size = 11 * 1.25)
+			ggplot2::theme_classic(base_size = 11 * 1.25) +
+			ezdyn_plot_size_rba()
 	}
 
 	line_layer <- if (is_alt_path || line_style == "combined") {
 		if (is_alt_path) {
-			ggplot2::geom_line(ggplot2::aes(x=date, y=value, group=line_label, colour=line_label))
+			ggplot2::geom_line(ggplot2::aes(x=date, y=value, group=line_label, colour=line_label, linetype=line_label))
 		} else {
 			ggplot2::geom_line(ggplot2::aes(x=t, y=value, group=line_label, colour=line_label))
 		}
@@ -363,6 +386,17 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 				name = NULL
 			) +
 			ggplot2::guides(colour = ggplot2::guide_legend(title = NULL))
+		if (is_alt_path) {
+			linetype_values <- ezdyn_line_label_linetypes(colour_values, baseline_name)
+			graph <- graph +
+				ggplot2::scale_linetype_manual(
+					values = linetype_values,
+					breaks = colour_levels,
+					drop = FALSE,
+					name = NULL
+				) +
+				ggplot2::guides(linetype = ggplot2::guide_legend(title = NULL))
+		}
 	}
 
 	if (length(response_vars) == 1) {

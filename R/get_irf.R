@@ -114,7 +114,8 @@ get_irf_custom <- function(M_, oo_, shock_names, horizon, data_frame=FALSE) {
 #' @param data_frame Logical. If TRUE, return a data frame instead of an array.
 #' @keywords internal
 get_irf_dynare <- function(M_, oo_, shock_names, horizon, data_frame=FALSE) {
-    # Get decision rule matrices
+    # Get decision rule matrices (uses `oo_$dr$A`/`B` precomputed by
+    # `read_dynare()` if available - see `get_dr_matrices()`).
     dr <- get_dr_matrices(M_, oo_)
     A <- dr$A
     B <- dr$B

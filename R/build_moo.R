@@ -45,6 +45,9 @@ ezdyn_validate_model_colour <- function(colour) {
 #' @param colour Optional colour used for this model's lines in [plot_pretty()]/
 #'   [plot_pretty_graph()] (e.g. alternative-path or optimal-policy comparisons).
 #'   `NULL` (default) leaves the model in the automatic dynamic palette.
+#' @param remove_vars Optional character vector of regular expressions,
+#'   applied via [remove_endo_vars()] to prune matching endogenous variables
+#'   from the model once built (`NULL`, the default, removes nothing).
 #'
 #' @return A full MOO pair of class `custom_moo`, containing `M_` and `oo_`.
 #' @export
@@ -52,7 +55,7 @@ ezdyn_validate_model_colour <- function(colour) {
 #' \dontrun{
 #' moo <- custom_moo(irf_df, model_name = "MyModel", meta = "meta.xlsx")
 #' }
-custom_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), subset_vars=FALSE, colour=NULL) {
+custom_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), subset_vars=FALSE, colour=NULL, remove_vars=NULL) {
     ezdyn_validate_model_colour(colour)
     M_ <- list()
     if (!is.null(meta)) {
@@ -96,6 +99,9 @@ custom_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), s
     class(oo_) <- "custom_moo"
     model <- list(M_ = M_, oo_ = oo_)
     class(model) <- "custom_moo"
+    if (!is.null(remove_vars)) {
+        model <- remove_endo_vars(model, remove_vars)
+    }
     model
 }
 
@@ -106,13 +112,14 @@ custom_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), s
 #' @inheritParams custom_moo
 #' @return A full MOO pair of class `custom_moo`, containing `M_` and `oo_`.
 #' @export
-read_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), subset_vars=FALSE, colour=NULL) {
+read_moo <- function(irf, model_name=NULL, meta=NULL, param_df=data.frame(), subset_vars=FALSE, colour=NULL, remove_vars=NULL) {
   custom_moo(
     irf = irf,
     model_name = model_name,
     meta = meta,
     param_df = param_df,
     subset_vars = subset_vars,
-    colour = colour
+    colour = colour,
+    remove_vars = remove_vars
   )
 }

@@ -212,7 +212,7 @@ get_policy_scenario <- function(
 
   output_dY <- dY[output_variables, seq_len(T), seq_len(T_instrument), drop = FALSE]
   alternative <- ezdyn_apply_policy_shocks(output_dY, shocks)
-  scenario_dates <- c(as.Date(forecast_start) - 92, forecast_dates)
+  scenario_dates <- c(seq(as.Date(forecast_start), by = "-1 quarter", length.out = 2)[[2]], forecast_dates)
   alternative <- rbind(0, t(alternative))
   colnames(alternative) <- output_variables
   scenario <- data.frame(date = scenario_dates, alternative, check.names = FALSE)
@@ -256,6 +256,241 @@ get_policy_scenario <- function(
     dplyr::arrange(date)
 }
 
+#' Run optimal-policy scenarios for one or more models.
+#'
+#' Loops [get_policy_scenario()] over every model in `models` and every
+#' strategy in `strategies`, so a dashboard or script only needs to supply a
+#' named list of models to compare optimal policy across them - the same
+#' "list of models in, one combined labelled data frame out" convention as
+#' [get_alt_paths()]/[get_irfs_target()]. Every model receives the same
+#' `strategies`/`use_cd`/`lambda`. A model with no anticipated policy shocks
+#' (`<shock>_1`, `<shock>_2`, ...), or any model when `use_cd` is `FALSE` or
+#' `lambda` is `0`, uses unanticipated shocks, for which timeless commitment
+#' and discretion are not distinct: it gets a single commitment strategy with
+#' no pre-forecast history, labelled `"Optimal (<model>)"`. A model with some
+#' anticipated shocks, but too few for a strategy's optimisation horizon (plus
+#' any timeless-commitment history), skips that strategy with a warning.
+#'
+#' @param strategies List of `policy_strategy` specifications (see
+#'   [get_policy_scenario()]). Each is run against every model in `models`;
+#'   any `output_name` already present is ignored and replaced with
+#'   `"Optimal (<model>, Commitment)"`/`"Optimal (<model>, Discretion)"`,
+#'   built from the model's name in `models` and `strategy$commit`
+#'   (`"commit"`/`"timeless"` map to "Commitment", `"disc"` maps to
+#'   "Discretion"), or `"Optimal (<model>)"` for a model using unanticipated
+#'   shocks.
+#' @param models Named list of full Dynare or custom-MOO pairs.
+#' @param baseline Wide baseline data frame shared by every model, as in
+#'   [get_policy_scenario()].
+#' @param use_cd Whether to use partially anticipated policy shocks.
+#' @param lambda Cognitive-discounting parameter.
+#' @param forecast_start First forecast quarter.
+#' @param forecast_end Final forecast quarter.
+#' @param loss_variable_vintages Optional long history for timeless commitment.
+#' @param preloss_start First historical commitment quarter for timeless policy.
+#' @param irf_cache Optional environment used to cache each model/strategy's
+#'   [build_policy_irfs()] result across repeated calls (e.g. across Shiny
+#'   reactive invalidations that change only loss weights/targets, not
+#'   variables/horizons). `NULL` (default) recomputes every call.
+#'
+#' @return A long data frame containing every model's baseline and
+#'   alternative paths, combined via [get_policy_scenario()], labelled by
+#'   each model's name in `models`.
+#' @export
+get_policy_scenarios <- function(
+    strategies,
+    models,
+    baseline,
+    use_cd = FALSE,
+    lambda = 0,
+    forecast_start,
+    forecast_end,
+    loss_variable_vintages = NULL,
+    preloss_start = NULL,
+    irf_cache = NULL) {
+  ezdyn_validate_baseline_models(models)
+  if (!is.list(strategies) || length(strategies) == 0) {
+    stop("`strategies` must be a non-empty list of policy strategies.", call. = FALSE)
+  }
+
+  compute <- function(model, model_name) {
+    # Unanticipated policy shocks (no anticipated shocks, or no anticipation)
+    # make timeless commitment and discretion meaningless, so each strategy
+    # becomes the same plain commitment strategy, run once.
+    model_strategies <- unique(lapply(strategies, function(strategy) {
+      strategy$unanticipated <- !(use_cd && lambda != 0) || ezdyn_policy_anticipated_count(model, strategy) == 0
+      if (strategy$unanticipated) strategy$commit <- "commit"
+      strategy
+    }))
+    # A plain lapply()/bind_rows() (not purrr::map_dfr()) so a genuine failure
+    # for one strategy propagates its real, unwrapped message up to
+    # ezdyn_combine_models_dfr()'s per-model error attribution, rather than
+    # being replaced by purrr's own opaque "In index: n" wrapping.
+    dplyr::bind_rows(lapply(model_strategies, function(strategy) {
+      ezdyn_policy_scenario_for_model(
+        strategy, model, model_name, baseline, use_cd, lambda,
+        forecast_start, forecast_end, loss_variable_vintages, preloss_start, irf_cache
+      )
+    }))
+  }
+
+  ezdyn_combine_models_dfr(models, compute, context = "get_policy_scenarios()")
+}
+
+# Count the anticipated versions (`<shock>_1`, `<shock>_2`, ...) of a
+# strategy's policy shock that a model supplies.
+ezdyn_policy_anticipated_count <- function(model, strategy) {
+  instrument_shock <- strategy$instrument_shock
+  if (is.null(instrument_shock)) instrument_shock <- "eps_r"
+  instrument_shock <- ezdyn_resolve_policy_shock_name(instrument_shock, model$M_)
+  exogenous <- model$M_$exo.names
+  if (is.null(exogenous)) exogenous <- model$M_$exo.vars
+  length(grep(paste0("^", instrument_shock, "_[0-9]+$"), exogenous))
+}
+
+# Run one (model, strategy) pair for get_policy_scenarios(): label the
+# strategy generically from the model's list name and commitment mode (just
+# the model's name if its shocks are unanticipated),
+# rebuild the variable/horizon inputs build_policy_irfs() needs (mirroring
+# get_policy_scenario()'s own instrument fallbacks so the pre-computed IRF
+# array always covers the instrument), and read/write the optional cache.
+ezdyn_policy_scenario_for_model <- function(strategy, model, model_name, baseline, use_cd, lambda,
+                                            forecast_start, forecast_end, loss_variable_vintages,
+                                            preloss_start, irf_cache) {
+  unanticipated <- isTRUE(strategy$unanticipated)
+  if (unanticipated) use_cd <- FALSE
+  strategy$output_name <- if (unanticipated) {
+    sprintf("Optimal (%s)", model_name)
+  } else {
+    sprintf("Optimal (%s, %s)", model_name, ezdyn_policy_mode_label(strategy$commit))
+  }
+
+  instrument_variable <- strategy$instrument_variable
+  if (is.null(instrument_variable)) instrument_variable <- "r_obs"
+  instrument_shock <- strategy$instrument_shock
+  if (is.null(instrument_shock)) instrument_shock <- "eps_r"
+  constraint_variables <- vapply(strategy$constraints, `[[`, character(1), "variable")
+
+  variables <- unique(c(
+    unlist(strategy$output_variables, use.names = FALSE),
+    unlist(strategy$loss_variables, use.names = FALSE),
+    constraint_variables,
+    instrument_variable
+  ))
+  preloss <- if (identical(strategy$commit, "timeless") && !is.null(preloss_start)) {
+    length(seq(as.Date(preloss_start), as.Date(forecast_start), by = "quarter")) - 1L
+  } else {
+    0L
+  }
+  horizon <- max(length(seq(as.Date(forecast_start), as.Date(forecast_end), by = "quarter")), strategy$T_loss + preloss)
+  instrument_horizon <- strategy$T_instrument + preloss
+
+  # A custom-MOO model (e.g. an IRF spreadsheet import) is capped at its own
+  # pre-tabulated horizon - unlike a Dynare model, it cannot be simulated
+  # further on demand. Timeless commitment's combined horizon (loss/
+  # instrument horizon plus the full preloss history back to
+  # `preloss_start`) can easily exceed that cap for a model with a much
+  # shorter policy strategy in mind. Rather than let this crash deep inside
+  # `build_policy_irfs()`'s array indexing ("subscript out of bounds"),
+  # gracefully skip just this (model, strategy) combination - every other
+  # compatible combination (other strategies for this model, and every
+  # strategy for other models) still runs, matching the same
+  # graceful-degradation precedent already used for unsupported cognitive
+  # discounting above.
+  max_horizon <- ezdyn_policy_max_horizon(model)
+  required_horizon <- max(horizon, instrument_horizon)
+  if (required_horizon > max_horizon) {
+    warning(
+      sprintf(
+        "Skipping `%s` for model `%s`: it only supplies impulse responses up to horizon %d, but this strategy requires %d (including any timeless-commitment history back to `preloss_start`). Reduce the loss/optimisation horizon or commitment-start date to include this model.",
+        strategy$output_name, model_name, max_horizon, required_horizon
+      ),
+      call. = FALSE
+    )
+    return(NULL)
+  }
+
+  # Likewise skip a strategy needing more anticipated policy shocks than the
+  # model supplies (rather than silently falling back to unanticipated shocks).
+  anticipated <- ezdyn_policy_anticipated_count(model, strategy)
+  if (use_cd && lambda != 0 && instrument_horizon > anticipated) {
+    warning(
+      sprintf(
+        "Skipping `%s` for model `%s`: it only supplies %d anticipated policy shocks, but this strategy requires %d (including any timeless-commitment history back to `preloss_start`). Reduce the optimisation horizon or commitment-start date to include this model.",
+        strategy$output_name, model_name, anticipated, instrument_horizon
+      ),
+      call. = FALSE
+    )
+    return(NULL)
+  }
+
+  policy_irfs <- ezdyn_cached_policy_irfs(
+    irf_cache, model, model_name, variables, horizon, instrument_horizon,
+    use_cd, lambda, instrument_shock
+  )
+  # Discretion with binding constraints may have no solution: omit just this
+  # strategy, explaining what happened and how to fix it.
+  tryCatch(
+    get_policy_scenario(
+      strategy, baseline, model, use_cd, lambda, forecast_start, forecast_end,
+      loss_variable_vintages, preloss_start, policy_irfs
+    ),
+    ezdyn_policy_discretion_failure = function(condition) {
+      constrained <- unique(vapply(
+        strategy$constraints,
+        function(constraint) sprintf("%s (%s bound)", constraint$variable, constraint$direction),
+        character(1)
+      ))
+      warning(
+        sprintf(
+          "Omitted `%s` for model `%s`: no discretionary solution was found%s (%s). With constraints, the discretion may fail to find a stable, time-consistent solution. To fix this, try shortening the constraint period or relaxing the constraint.",
+          strategy$output_name, model_name,
+          if (length(constrained) > 0) paste(" with the constraint(s) on", paste(constrained, collapse = ", ")) else "",
+          sub("\\.$", "", condition$message)
+        ),
+        call. = FALSE
+      )
+      NULL
+    }
+  )
+}
+
+# Map a policy strategy's `commit` mode to a generic display label - shared
+# by every model, replacing any dashboard-specific hardcoded label.
+ezdyn_policy_mode_label <- function(commit) {
+  switch(commit, commit = "Commitment", timeless = "Commitment", disc = "Discretion", commit)
+}
+
+# Return the maximum horizon a model's IRF data can supply. A Dynare model
+# can be simulated to any horizon on demand (no cap); a custom-MOO model
+# (e.g. an imported IRF spreadsheet) is capped at its own pre-tabulated
+# `oo_$irf$t` maximum (see `get_irf_custom()` in get_irf.R).
+ezdyn_policy_max_horizon <- function(model) {
+  if (inherits(model$oo_, "custom_moo") && !is.null(model$oo_$irf$t)) {
+    max(model$oo_$irf$t)
+  } else {
+    Inf
+  }
+}
+
+# Read/write build_policy_irfs() results from an optional cache environment,
+# keyed by model, variables, horizons, and CD settings - mirrors the
+# dashboard's own former per-session cache so repeated calls that only change
+# loss weights/targets (not variables/horizons) avoid recomputing IRFs.
+ezdyn_cached_policy_irfs <- function(cache, model, model_name, variables, horizon, instrument_horizon,
+                                     use_cd, lambda, instrument_shock) {
+  if (is.null(cache)) {
+    return(build_policy_irfs(model, variables, horizon, instrument_horizon, use_cd, lambda, instrument_shock))
+  }
+  key <- paste(model_name, paste(variables, collapse = "|"), horizon, instrument_horizon, use_cd, lambda, sep = "::")
+  if (exists(key, envir = cache, inherits = FALSE)) {
+    return(get(key, envir = cache, inherits = FALSE))
+  }
+  value <- build_policy_irfs(model, variables, horizon, instrument_horizon, use_cd, lambda, instrument_shock)
+  assign(key, value, envir = cache)
+  value
+}
+
 #' Build monetary-policy IRFs for optimal policy.
 #'
 #' @param model Full Dynare or custom-MOO pair.
@@ -285,6 +520,17 @@ build_policy_irfs <- function(model, variables, horizon, instrument_horizon, use
       warning("Policy model does not support the requested anticipated-shock horizon; using unanticipated policy shocks.", call. = FALSE)
       use_cd <- FALSE
     }
+  }
+  max_horizon <- ezdyn_policy_max_horizon(model)
+  required_horizon <- max(horizon, instrument_horizon)
+  if (required_horizon > max_horizon) {
+    stop(
+      sprintf(
+        "Policy model only supplies impulse responses up to horizon %d, but this calculation requires %d. Reduce `horizon`/`instrument_horizon`, or use a model with longer IRF data.",
+        max_horizon, required_horizon
+      ),
+      call. = FALSE
+    )
   }
   matrix_irf <- if (use_cd && lambda != 0) {
     get_ir_matrix_gabaix(model$M_, model$oo_, horizon, instrument_shock, instrument_horizon, lambda, var_names = variables)$Mh_total
@@ -360,9 +606,9 @@ ezdyn_validate_policy_solution <- function(constraints, dY, Y0, shocks) {
     if (isTRUE(constraint$historical) || length(periods) == 0) next
     constrained <- values[constraint$variable, periods]
     valid <- if (constraint$direction == "lower") {
-      constrained >= constraint$value - 1e-6
+      constrained >= constraint$value - 1e-5
     } else {
-      constrained <= constraint$value + 1e-6
+      constrained <= constraint$value + 1e-5
     }
     if (!all(valid)) {
       stop(sprintf("Policy solution violates the %s bound on %s.", constraint$direction, constraint$variable), call. = FALSE)
@@ -470,7 +716,7 @@ ezdyn_policy_discretion <- function(Y0, dY, weights, discount_factor, constraint
       assigned[affected] <- period
       binding <- which(active & assigned == period)
       if (length(binding) > 1) {
-        stop("More than one constraint binds the same discretionary policy decision.", call. = FALSE)
+        ezdyn_policy_discretion_failure("More than one constraint binds the same discretionary policy decision.")
       }
       if (length(binding) == 1) {
         policy_conditions[period, effects] <- C_long[binding, effects]
@@ -492,16 +738,27 @@ ezdyn_policy_discretion <- function(Y0, dY, weights, discount_factor, constraint
       multipliers[[index]] <- -drop(t(discretionary_response[[period]]) %*% W %*% values[effects]) /
         drop(C_long[index, effects] %*% discretionary_response[[period]])
     }
-    if (all(inequality <= 1e-8) && all(multipliers[active] >= -1e-8)) return(shocks)
+    # Violations below 1e-5 are numerical noise; a tighter tolerance lets a
+    # near-degenerate constraint switch on and off indefinitely.
+    if (all(inequality <= 1e-5) && all(multipliers[active] >= -1e-8)) return(shocks)
 
     active_old <- active
-    active[inequality > 1e-8] <- TRUE
+    active[inequality > 1e-5] <- TRUE
     active[active & multipliers < -1e-8] <- FALSE
     if (identical(active, active_old)) {
-      stop("Discretionary constraint active set cannot resolve the solution.", call. = FALSE)
+      ezdyn_policy_discretion_failure("Discretionary constraint active set cannot resolve the solution.")
     }
   }
-  stop("Discretionary constraint active set did not converge.", call. = FALSE)
+  ezdyn_policy_discretion_failure("Discretionary constraint active set did not converge.")
+}
+
+# Signal that no discretionary solution was found, with a class so callers can
+# omit just that strategy rather than abort the whole calculation.
+ezdyn_policy_discretion_failure <- function(message) {
+  stop(structure(
+    class = c("ezdyn_policy_discretion_failure", "error", "condition"),
+    list(message = message, call = NULL)
+  ))
 }
 
 ezdyn_policy_history <- function(vintages, variables, preloss_start, forecast_start, horizon, current) {

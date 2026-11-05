@@ -174,6 +174,13 @@ UITab_AltPaths <- function(id, config) {
           step = 0.05
         )
       ),
+      shiny::selectInput(
+        ns("baseline_name"),
+        "Baseline:",
+        choices = names(config$baselines),
+        selected = config$default_baseline
+      ),
+      shiny::tags$p(shiny::strong("Active baseline: "), shiny::textOutput(ns("active_baseline"), inline = TRUE)),
       shiny::tags$label(class = "control-label", "Cash Rate path:"),
       shiny::fluidRow(
         class = "slider-container",
@@ -182,14 +189,8 @@ UITab_AltPaths <- function(id, config) {
       dashboard_plot_mode_controls(
         ns,
         advanced_input = "show_advanced",
+        plotters = config$plotters,
         advanced_controls = shiny::tagList(
-          shiny::selectInput(
-            ns("baseline_name"),
-            "Baseline:",
-            choices = names(config$baselines),
-            selected = config$default_baseline
-          ),
-          shiny::tags$p(shiny::strong("Active baseline: "), shiny::textOutput(ns("active_baseline"), inline = TRUE)),
           shiny::sliderInput(
             ns("date_range"),
             "Plot range:",
@@ -410,14 +411,27 @@ ServerTab_AltPaths <- function(id, config) {
     plotted_paths <- shiny::reactive({
       data <- displayed_paths()
       shiny::validate(shiny::need(nrow(data) > 0, "No alternative-path output matches the selected variables and dates."))
-      plot_pretty(
+      plotter <- dashboard_selected_plotter(input, config$plotters)
+      out <- plot_pretty(
         data,
         display_names = unique(data$display_name),
         title = alt_paths_plot_title(data$display_name),
         baseline_name = "Baseline",
         baseline_colour = "royalblue",
-        plotter = dashboard_selected_plotter(input)
+        plotter = plotter
       )
+      footnotes <- dashboard_response_notes_footnote(data, config$response_notes)
+      if (!is.null(footnotes)) {
+        out$graph <- out$graph + (
+          # ggrba::footnote_rba() expects each distinct footnote as its own
+          # vector element (it numbers each with its own `*`/`**`/... marker);
+          # passing a pre-joined single string would register every note as
+          # one combined footnote instead. ggplot2::labs() only ever takes a
+          # single caption string, so join with newlines there instead.
+          if (plotter == "ggrba") ggrba::footnote_rba(footnotes) else ggplot2::labs(caption = paste(footnotes, collapse = "\n"))
+        )
+      }
+      out
     })
     export_paths <- shiny::reactive({
       output_vars <- selected_paths() |>
@@ -456,7 +470,7 @@ ServerTab_AltPaths <- function(id, config) {
       output = output,
       graph = shiny::reactive(plotted_paths()$graph),
       compatibility_mode = shiny::reactive(isTRUE(input$use_compatibility_plot)),
-      plotter = shiny::reactive(dashboard_selected_plotter(input))
+      plotter = shiny::reactive(dashboard_selected_plotter(input, config$plotters))
     )
     output$table <- shiny::renderTable(table_paths(), rownames = FALSE)
     output$download_data <- shiny::downloadHandler(
@@ -465,7 +479,7 @@ ServerTab_AltPaths <- function(id, config) {
     )
     output$download_graph <- shiny::downloadHandler(
       filename = function() paste0(plotted_paths()$graph_fname, ".svg"),
-      content = function(file) ezdyn_ggsave(file, plotted_paths()$graph, plotter = dashboard_selected_plotter(input))
+      content = function(file) ezdyn_ggsave(file, plotted_paths()$graph, plotter = dashboard_selected_plotter(input, config$plotters))
     )
 
     # 3.10. Build the upload modal from allowed configuration values. Model-input

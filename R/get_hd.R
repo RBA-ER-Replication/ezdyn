@@ -64,10 +64,10 @@ resolve_first_field <- function(x, candidates) {
 #' `custom_moo()` IRF-only pairs never have these fields.
 #'
 #' This is necessary but not sufficient for `get_hd()` to fully succeed: it
-#' also reads `oo_$dr$ghx`/`ghu`/`order_var`/`inv_order_var`/`kstate` and
-#' `M_$maximum_lag`, which are not checked here. Tighten this check to also
-#' require `oo_$dr` once the A/B (`ghx`/`ghu`) decision-rule matrices are
-#' cached directly on the model object, making that check cheap.
+#' also reads the precomputed decision-rule matrices `oo_$dr$A`/`B` (falling
+#' back to deriving them from `oo_$dr$ghx`/`ghu`/`order_var`/`kstate` via
+#' `get_dr_matrices()` if absent) and requires `M_$maximum_lag <= 1`, which are
+#' not checked here.
 #'
 #' @param oo_ Dynare output structure.
 #'
@@ -113,17 +113,19 @@ get_hd <- function(M_, oo_, varlist = NULL, nvar_unobs = 0L, i_var_unobs = integ
 	# Useful definitions
 	endo_nbr <- M_$endo_nbr
 	nshocks <- M_$exo_nbr
-	dr <- oo_$dr
 	maximum_lag <- M_$maximum_lag
-
-	# Data ordering
-	order_var <- dr$order_var
-	inv_order_var <- oo_$dr$inv_order_var
-
-	# Reduced form coefficients
-	A <- dr$ghx
-	B <- dr$ghu
 	es <- oo_
+
+	# Reduced form coefficients (uses `oo_$dr$A`/`B` precomputed by
+	# `read_dynare()` if available - see `get_dr_matrices()`). The single
+	# matrix-multiply recursion below assumes a single-period lag structure,
+	# matching `get_dr_matrices()`'s own assumption.
+	if (maximum_lag > 1L) {
+		stop("get_hd() only supports models with `M_$maximum_lag <= 1`.", call. = FALSE)
+	}
+	dr <- get_dr_matrices(M_, oo_)
+	A <- dr$A
+	B <- dr$B
 
 	exo_names <- extract_dynare_names(resolve_first_field(M_, c("exo_names", "exo.names")))
 	endo_names <- extract_dynare_names(resolve_first_field(M_, c("endo_names", "endo.names")))
@@ -185,42 +187,19 @@ get_hd <- function(M_, oo_, varlist = NULL, nvar_unobs = 0L, i_var_unobs = integ
 		)
 	}
 
-	# State indexing used in recursive contribution propagation
-	kstate <- dr$kstate
-	k2 <- kstate[kstate[, 2] <= (maximum_lag + 1L), c(1, 2), drop = FALSE]
-	# Match MATLAB effective formula (given prior loop scope):
-	# (maximum_lag + 1 - k2(:,2)) * endo_nbr
-	i_state <- order_var[k2[, 1]] + (maximum_lag + 1L - k2[, 2]) * endo_nbr
-
-	lags <- integer(0)
+	# Recursive contribution propagation. Since `A`/`B` are already in
+	# `M_$endo_names` order (state-variable columns of `A` are zero for every
+	# non-state variable), the previous period's per-shock contributions can be
+	# propagated directly via a single matrix multiply - no separate state
+	# indexing/lag-stacking is needed for a `maximum_lag <= 1` model.
 	for (tt in seq_len(gend)) {
-		if (tt > 1L && tt <= (maximum_lag + 1L)) {
-			lags <- seq.int(from = min(tt - 1L, maximum_lag), to = 1L, by = -1L)
-		}
-
 		if (tt > 1L) {
-			m <- min(tt - 1L, maximum_lag)
-
-			# Equivalent to MATLAB: permute(z(:,1:nshocks,lags), [1 3 2])
-			tempx <- aperm(z[, seq_len(nshocks), lags, drop = FALSE], c(1, 3, 2))
-			tempx <- matrix(tempx, nrow = endo_nbr * m, ncol = nshocks)
-
-			# Pad missing lag blocks with zeros when tt <= maximum_lag + 1
-			n_pad <- endo_nbr * max(maximum_lag - tt + 1L, 0L)
-			if (n_pad > 0L) {
-				tempx <- rbind(tempx, matrix(0, nrow = n_pad, ncol = nshocks))
-			}
-
-			z[, seq_len(nshocks), tt] <- A[inv_order_var, , drop = FALSE] %*%
-				tempx[i_state, , drop = FALSE]
-
-			lags <- lags + 1L
+			z[, seq_len(nshocks), tt] <- A %*% z[, seq_len(nshocks), tt - 1L]
 		}
 
-		# Add contemporaneous shock contribution:
-		# B(inv_order_var,:) .* repmat(epsilon(:,tt)', endo_nbr, 1)
+		# Add contemporaneous shock contribution.
 		z[, seq_len(nshocks), tt] <- z[, seq_len(nshocks), tt] +
-			sweep(B[inv_order_var, , drop = FALSE], 2, epsilon[, tt], `*`)
+			sweep(B, 2, epsilon[, tt], `*`)
 
 		# Total contribution of all shocks
 		z[, nshocks + 1L, tt] <- rowSums(z[, seq_len(nshocks), tt, drop = FALSE])

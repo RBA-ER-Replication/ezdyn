@@ -28,8 +28,14 @@ UITab_IRF <- function(id, config) {
   shock_selector <- irf_shock_selector(selected_model_objects)
   response_choices <- irf_response_choices(selected_model_objects)
   common_display_choices <- response_choices$choices
-  selected_shocks <- irf_default_shock_selection(shock_selector)
+  target_choices <- irf_target_choices(selected_model_objects)
+  selected_shocks <- irf_default_shock_selection(shock_selector, defaults$shock)
   selected_responses <- irf_preserve_selection(defaults$display_names, response_choices$values)
+  selected_target <- irf_preserve_selection(
+    defaults$target_display_name,
+    target_choices$values,
+    utils::head(selected_responses, 1)
+  )
   scenario_choices <- if (!is.null(scenarios)) {
     irf_choices(scenarios$scenario[scenarios$model_name %in% selected_models])
   } else {
@@ -115,8 +121,8 @@ UITab_IRF <- function(id, config) {
         shiny::selectInput(
           ns("target_display_name"),
           "Target variable:",
-          choices = common_display_choices,
-          selected = utils::head(selected_responses, 1)
+          choices = target_choices$choices,
+          selected = selected_target
         ),
         shiny::numericInput(
           ns("target_value"),
@@ -150,6 +156,7 @@ UITab_IRF <- function(id, config) {
       ),
       dashboard_plot_mode_controls(
         ns,
+        plotters = config$plotters,
         advanced_controls = shiny::tagList(
           shiny::textInput(ns("custom_title"), "Custom graph title:"),
           shiny::conditionalPanel(
@@ -223,6 +230,7 @@ ServerTab_IRF <- function(id, config) {
     })
     shock_selector <- shiny::reactive(irf_shock_selector(selected_models()))
     response_choices <- shiny::reactive(irf_response_choices(selected_models()))
+    target_choices <- shiny::reactive(irf_target_choices(selected_models()))
     scenario_selector_data <- shiny::reactive({
       if (!has_scenarios) {
         return(NULL)
@@ -251,21 +259,22 @@ ServerTab_IRF <- function(id, config) {
       }
       shocks <- shock_selector()
       display_choices <- response_choices()
+      targets <- target_choices()
       shiny::updateSelectizeInput(
         session,
         "target_shock",
         choices = shocks$choices,
-        selected = irf_preserve_shock_selection(input$target_shock, shocks),
+        selected = irf_preserve_shock_selection(input$target_shock, shocks, defaults$shock),
         server = TRUE
       )
       shiny::updateSelectInput(
         session,
         "target_display_name",
-        choices = display_choices$choices,
+        choices = targets$choices,
         selected = irf_preserve_selection(
           input$target_display_name,
-          display_choices$values,
-          defaults$display_names
+          targets$values,
+          defaults$target_display_name
         )
       )
       shiny::updateSelectizeInput(
@@ -279,7 +288,7 @@ ServerTab_IRF <- function(id, config) {
         session,
         "direct_shocks",
         choices = shocks$choices,
-        selected = irf_preserve_shock_selection(input$direct_shocks, shocks),
+        selected = irf_preserve_shock_selection(input$direct_shocks, shocks, defaults$shock),
         server = TRUE
       )
       shiny::updateSelectizeInput(
@@ -343,15 +352,20 @@ ServerTab_IRF <- function(id, config) {
         shiny::req(input$target_display_name, input$target_shock, input$target_display_names)
         resolved_shocks <- irf_resolve_model_shocks(shock_selector(), input$target_shock)
         shiny::validate(shiny::need(resolved_shocks$valid, resolved_shocks$message))
-        target_data <- irf_run_targeted(
-          selected_models(),
-          target_display_name = input$target_display_name,
-          target_value = input$target_value,
-          model_shocks = resolved_shocks$shocks,
-          horizon = input$target_horizon,
-          use_cd = isTRUE(input$target_use_cd),
-          lambda = input$target_lambda
+        target_data <- tryCatch(
+          irf_run_targeted(
+            selected_models(),
+            target_display_name = input$target_display_name,
+            target_value = input$target_value,
+            model_shocks = resolved_shocks$shocks,
+            horizon = input$target_horizon,
+            use_cd = isTRUE(input$target_use_cd),
+            lambda = input$target_lambda
+          ),
+          error = function(e) e
         )
+        failed <- inherits(target_data, "error")
+        shiny::validate(shiny::need(!failed, if (failed) conditionMessage(target_data)))
         data <- target_data |>
           dplyr::filter(display_name %in% input$target_display_names)
         data <- irf_label_selected_shocks(
@@ -384,11 +398,17 @@ ServerTab_IRF <- function(id, config) {
       shiny::req(input$direct_shocks, input$direct_display_names)
       resolved_shocks <- irf_resolve_model_shocks(shock_selector(), input$direct_shocks)
       shiny::validate(shiny::need(resolved_shocks$valid, resolved_shocks$message))
-      data <- irf_run_direct(
-        selected_models(),
-        model_shocks = resolved_shocks$shocks,
-        horizon = input$direct_horizon
-      ) |>
+      direct_data <- tryCatch(
+        irf_run_direct(
+          selected_models(),
+          model_shocks = resolved_shocks$shocks,
+          horizon = input$direct_horizon
+        ),
+        error = function(e) e
+      )
+      failed <- inherits(direct_data, "error")
+      shiny::validate(shiny::need(!failed, if (failed) conditionMessage(direct_data)))
+      data <- direct_data |>
         dplyr::filter(display_name %in% input$direct_display_names)
       data <- irf_label_selected_shocks(
         data,
@@ -416,7 +436,7 @@ ServerTab_IRF <- function(id, config) {
       result <- mode_result()
       shiny::validate(shiny::need(nrow(result$data) > 0, "No IRFs match the current selection."))
       title <- irf_title_or_default(input$custom_title, result$title)
-      plotter <- dashboard_selected_plotter(input)
+      plotter <- dashboard_selected_plotter(input, config$plotters)
       out <- plot_pretty(
         result$data,
         display_names = result$display_names,
@@ -424,9 +444,15 @@ ServerTab_IRF <- function(id, config) {
         title = title,
         plotter = plotter
       )
-      if (!is.null(result$footnote)) {
+      footnotes <- c(result$footnote, dashboard_response_notes_footnote(result$data, config$response_notes))
+      if (length(footnotes) > 0) {
         out$graph <- out$graph + (
-          if (plotter == "ggrba") ggrba::footnote_rba(result$footnote) else ggplot2::labs(caption = result$footnote)
+          # ggrba::footnote_rba() expects each distinct footnote as its own
+          # vector element (it numbers each with its own `*`/`**`/... marker);
+          # passing a pre-joined single string would register every note as
+          # one combined footnote instead. ggplot2::labs() only ever takes a
+          # single caption string, so join with newlines there instead.
+          if (plotter == "ggrba") ggrba::footnote_rba(footnotes) else ggplot2::labs(caption = paste(footnotes, collapse = "\n"))
         )
       }
       out
@@ -444,7 +470,7 @@ ServerTab_IRF <- function(id, config) {
       output = output,
       graph = shiny::reactive(plot()$graph),
       compatibility_mode = shiny::reactive(isTRUE(input$use_compatibility_plot)),
-      plotter = shiny::reactive(dashboard_selected_plotter(input))
+      plotter = shiny::reactive(dashboard_selected_plotter(input, config$plotters))
     )
     output$download_data <- shiny::downloadHandler(
       filename = function() paste0(plot()$graph_fname, ".xlsx"),
@@ -452,7 +478,7 @@ ServerTab_IRF <- function(id, config) {
     )
     output$download_graph <- shiny::downloadHandler(
       filename = function() paste0(plot()$graph_fname, ".svg"),
-      content = function(file) ezdyn_ggsave(file, plot()$graph, plotter = dashboard_selected_plotter(input))
+      content = function(file) ezdyn_ggsave(file, plot()$graph, plotter = dashboard_selected_plotter(input, config$plotters))
     )
   })
 }

@@ -321,6 +321,39 @@ ezdyn_descale_targets <- function(target, M_, scale_targets=TRUE) {
     })
 }
 
+# `get_irf_target()`/`get_irf_target_gabaix()` calibrate shocks by solving
+# directly against the model's native (raw, dynare-solved) IRF matrix - they
+# have no support for metadata-declared derived variables (e.g. year-ended
+# inflation), unlike plain IRF display, which augments derived rows post-hoc
+# (`ezdyn_augment_derived_irf_rows()`). Requesting a derived variable as a
+# target used to silently produce an `NA`-filled matrix row (via
+# `flatten_ir_matrix()`'s `match()`) that only failed later, opaquely, inside
+# `qr.solve()`. Validate eagerly instead, with a message that names the
+# derived variable and its source so a caller can target the source directly.
+ezdyn_validate_native_target_names <- function(target_names, available_names, M_) {
+    missing <- setdiff(target_names, available_names)
+    if (length(missing) == 0) {
+        return(invisible(TRUE))
+    }
+
+    lookup <- ezdyn_derived_variable_lookup(M_$varmeta)
+    describe_target <- function(name) {
+        derived <- lookup[[name]]
+        if (!is.null(derived)) {
+            sprintf("`%s` (derived from `%s`)", name, derived$source)
+        } else {
+            sprintf("`%s`", name)
+        }
+    }
+    stop(
+        sprintf(
+            "`target` must name variable(s) natively solved by the model: %s. Metadata-derived variables cannot be used as calibration targets; target the underlying source variable instead.",
+            paste(vapply(missing, describe_target, character(1)), collapse = ", ")
+        ),
+        call. = FALSE
+    )
+}
+
 # Pretty IRF validation ---------------------------------------------------
 
 ezdyn_validate_pretty_irf_units <- function(df, unit_symbol_column="unit_symbol_irf") {
