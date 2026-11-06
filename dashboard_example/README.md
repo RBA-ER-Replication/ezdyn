@@ -4,8 +4,11 @@ A multi-model [ezdyn](../../functions/ezdyn) dashboard combining the
 Smets-Wouters (2007) estimated model with 7 curated small-scale New Keynesian
 models from Johannes Pfeifer's
 [DSGE_mod](https://github.com/JohannesPfeifer/DSGE_mod) collection of Dynare
-replication files. Every model here has an active monetary policy shock, so
-the dashboard can be used for cross-model impulse-response policy exercises.
+replication files, plus two semi-structural models: estimated responses to the
+Romer-Romer (2004) and Gertler-Karadi (2015) monetary policy shocks, from
+McKay and Wolf (2023). Every model here has an active monetary policy shock,
+so the dashboard can be used for cross-model impulse-response policy
+exercises.
 
 ## Launch the dashboard
 
@@ -77,6 +80,19 @@ Rscript build_us_baseline.R
 This writes `inputs/us_baseline.xlsx` (see [US baseline data](#us-baseline-data)
 below). It takes a couple of minutes, mostly fetching the real-time vintages.
 Re-run it after each data release or SEP to refresh the baseline.
+
+### 5. Build the semi-structural models (R)
+
+From `dashboard/DSGEModDash`:
+
+```powershell
+Rscript build_semi_structural_models.R
+```
+
+This downloads McKay and Wolf's (2023) published estimates and writes
+`inputs/semi_structural_irfs.csv` and `inputs/semi_structural_metadata.xlsx`
+(see [Semi-structural models](#semi-structural-models) below). No API key is
+needed.
 
 ## US baseline data
 
@@ -192,6 +208,76 @@ can't change today's expectations, so commitment, timeless commitment and
 discretion give the same optimal path for SW. They only differ in a model with
 anticipated policy shocks.
 
+## Semi-structural models
+
+"Romer-Romer (2004)" and "Gertler-Karadi (2015)" are empirical models: the
+estimated responses of the US economy to two monetary policy shock series,
+from McKay and Wolf (2023), "What Can Time-Series Regressions Tell Us About
+Policy Counterfactuals?", *Econometrica* 91(5). `build_semi_structural_models.R`
+downloads their published estimates from the paper's replication files
+([ckwolf92/policy_cnfctls](https://github.com/ckwolf92/policy_cnfctls), MIT
+licence, pinned to commit `4e4e81f`).
+
+### Estimates
+
+- **Shocks**: the Romer and Romer (2004) narrative shocks, extended to 2007 by
+  Wieland and Yang (2020); and the Gertler and Karadi (2015) surprise in
+  current-month fed funds futures around FOMC announcements (`mp1_tc` from
+  Ramey 2016, available from 1988Q4).
+- **Model**: a quarterly VAR over 1969Q1-2007Q4 with 4 lags, a constant and a
+  linear trend, estimated with a flat prior. The variables, in order, are the
+  GK shock, the HP-filtered output gap, GDP deflator inflation, log commodity
+  prices, the RR shock and the fed funds rate. Each shock's effects are
+  identified by that ordering, with the shock set to zero where its series is
+  unavailable.
+- **Responses**: the posterior medians over 100 quarters.
+
+The two shocks move rates differently. An RR shock is a short-lived jump in
+the fed funds rate that reverses within about a year. A GK shock raises rates
+gradually over about 18 months and keeps them elevated for about three years. Output and
+inflation fall after an RR shock. After a GK shock they rise slightly at first
+(a "price puzzle" in the estimates) and only fall after about two years.
+
+### Variables
+
+| Code | Display name | From the estimates |
+|---|---|---|
+| `ygap` | Output Gap | Output gap response (%) |
+| `output` | Output | Same as the output gap (the shock doesn't move potential output) |
+| `dy` | Output Growth | Quarterly change in the output gap |
+| `pinfobs` | Inflation | Annualised inflation / 4 |
+| `pinfobs_ye` | Inflation (year-ended) | Sum of the last four quarters of `pinfobs` |
+| `robs` | Nominal Interest Rate | Fed funds rate (stored as fed funds rate / 4, shown x 4) |
+| `robs_q` | Nominal Interest Rate (quarterly) | Fed funds rate / 4 |
+
+Codes, names and units match Smets-Wouters', so the models use the
+dashboard's US baseline and Optimal Policy settings unchanged. Each shock is
+scaled so the fed funds rate peaks 100bp (annualised) above baseline.
+
+### In the dashboard
+
+- **Impulse Response Library**: responses to the "Monetary policy shock",
+  comparable with the other models.
+- **Optimal Policy**: Gertler-Karadi (2015) is the comparison model, so its
+  optimal path under commitment is shown next to SW's. Response variables it
+  lacks are left out. If a loss, constraint or instrument variable it lacks is
+  selected (e.g. wage growth), its path isn't shown and a notice says why.
+  Because output and inflation rise at first after a GK rate rise, its optimal
+  path can move rates the opposite way to SW's in the short run. Beyond the
+  first few years its path is unreliable: with a 40-quarter horizon and no
+  ELB, it keeps cutting, to about -23% by quarter 40, because cuts that late
+  only take effect after the loss horizon ends. Turn on the ELB or shorten the
+  horizons when comparing with it.
+- **Alternative Paths**: selectable, but not selected by default. Treat their
+  results with caution. The tab hits the rate path with a fresh surprise shock
+  each quarter, and both estimated rate responses peak after impact, so
+  holding the rate on a path takes shocks that alternate in sign and grow, and
+  output and inflation oscillate. McKay and Wolf instead treat the shocks as
+  news about the whole rate path and combine them, which the dashboard doesn't
+  do.
+- **Not available**: Historical Shock Decomposition (there are no smoothed
+  shocks), and hours or wage variables.
+
 ## Common variables
 
 Every DSGE model (Smets-Wouters and the 7 Pfeifer models) has these six
@@ -222,6 +308,9 @@ Each comes from the model variable below. In every model:
 Because the policy instrument is annualised, the Alternative Paths sliders,
 Custom IRF targets and Optimal Policy rate settings (loss targets, bounds and
 the 0.1% ELB) are all in annual per cent.
+
+The semi-structural models also have "Inflation (year-ended)" and "Nominal
+Interest Rate (quarterly)" (see their Variables table above).
 
 | Model | Inflation | Nominal Interest Rate | Hours Worked | Output |
 |---|---|---|---|---|
@@ -310,9 +399,12 @@ Rate (quarterly)" and "Output".
   metadata workbooks (R).
 - `build_us_baseline.R` - builds the US baseline, timeline and real-time
   vintages from FRED (R).
+- `build_semi_structural_models.R` - builds the Romer-Romer and
+  Gertler-Karadi semi-structural models from McKay and Wolf's (2023) estimates
+  (R).
 - `usa_dashboard.R` - dashboard composition (paths, timeline, model list,
   `configure_dashboard()` call, `usa_dashboard()` function).
 - `app.R` - deploy entrypoint; sources `usa_dashboard.R` and returns the app.
 - `DSGE_mod/` - cloned separately (step 1 above), not tracked in this repo.
-- `inputs/` - generated by steps 2-4 above, not tracked in this repo (see
+- `inputs/` - generated by steps 2-5 above, not tracked in this repo (see
   `.gitignore`) - regenerate locally rather than committing these.
