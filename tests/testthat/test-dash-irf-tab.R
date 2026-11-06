@@ -142,7 +142,9 @@ testthat::test_that("IRF UI exposes all three namespaced modes", {
   ))
   testthat::expect_false(grepl("irfs-target_scale_targets", ui_html))
   testthat::expect_match(ui_html, "Plot compatibility mode")
-  testthat::expect_false(grepl("id=\"irfs-use_compatibility_plot\"[^>]*checked", ui_html))
+  # dashboard_test_config() keeps the default `plotters = "ggplot"`, so
+  # compatibility mode starts on.
+  testthat::expect_true(grepl("id=\"irfs-use_compatibility_plot\"[^>]*checked", ui_html))
   testthat::expect_match(ui_html, "Downloads")
   testthat::expect_match(ui_html, "Test Scenario")
   testthat::expect_match(ui_html, "Other Scenario")

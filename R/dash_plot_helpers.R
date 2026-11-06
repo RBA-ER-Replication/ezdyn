@@ -91,6 +91,8 @@ dashboard_sync_compatibility_mode <- function(
 #' This keeps the renderer selector in the tab's left panel, using the existing
 #' Alternative Paths Advanced Options switch style. Compatibility mode enables
 #' direct Shiny rendering for deployments that require separated plot panels.
+#' It starts on when the default backend is `"ggplot"`, matching
+#' [dashboard_sync_compatibility_mode()], which only reacts to later changes.
 #'
 #' @param ns A Shiny namespace function.
 #' @param plotters Character vector of configured backends, e.g.
@@ -112,6 +114,7 @@ dashboard_plot_mode_controls <- function(
     plotter_input = "plotter",
     advanced_controls = NULL) {
   plotter_labels <- c(ggrba = "RBA style", ggplot = "ggplot2")
+  default_plotter <- if ("ggrba" %in% plotters) "ggrba" else plotters[[1]]
   shiny::tagList(
     shinyWidgets::prettySwitch(
       ns(advanced_input),
@@ -124,14 +127,14 @@ dashboard_plot_mode_controls <- function(
       shiny::checkboxInput(
         ns(compatibility_input),
         "Plot compatibility mode",
-        value = FALSE
+        value = identical(default_plotter, "ggplot")
       ),
       if (length(plotters) > 1) {
         shiny::radioButtons(
           ns(plotter_input),
           "Plot style:",
           choices = stats::setNames(plotters, plotter_labels[plotters]),
-          selected = if ("ggrba" %in% plotters) "ggrba" else plotters[[1]],
+          selected = default_plotter,
           inline = TRUE
         )
       },

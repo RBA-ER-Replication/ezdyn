@@ -6,6 +6,7 @@
 \usage{
 dashboard_plot_mode_controls(
   ns,
+  plotters = "ggplot",
   advanced_input = "show_plot_advanced_options",
   compatibility_input = "use_compatibility_plot",
   plotter_input = "plotter",
@@ -15,13 +16,16 @@ dashboard_plot_mode_controls(
 \arguments{
 \item{ns}{A Shiny namespace function.}
 
+\item{plotters}{Character vector of configured backends, e.g.
+`config$plotters` from [configure_dashboard()]. The "Plot style" control
+is shown only when more than one backend is configured, since there is
+otherwise only one available choice.}
+
 \item{advanced_input}{Input identifier for the Advanced Options switch.}
 
 \item{compatibility_input}{Input identifier for the renderer checkbox.}
 
-\item{plotter_input}{Input identifier for the plot-style control. Hidden
-entirely when the optional ggrba package is not installed, since there is
-then only one available backend.}
+\item{plotter_input}{Input identifier for the plot-style control.}
 
 \item{advanced_controls}{Optional module-specific controls shown alongside
 the renderer checkbox when Advanced options is enabled.}
@@ -33,4 +37,6 @@ Shiny UI.
 This keeps the renderer selector in the tab's left panel, using the existing
 Alternative Paths Advanced Options switch style. Compatibility mode enables
 direct Shiny rendering for deployments that require separated plot panels.
+It starts on when the default backend is `"ggplot"`, matching
+[dashboard_sync_compatibility_mode()], which only reacts to later changes.
 }

@@ -29,6 +29,17 @@ testthat::test_that("dashboard_sync_compatibility_mode toggles compatibility mod
   testthat::expect_equal(recorded_values, c(TRUE, FALSE))
 })
 
+testthat::test_that("dashboard_plot_mode_controls starts compatibility mode on only for a default ggplot backend", {
+  compatibility_checked <- function(plotters) {
+    ui_html <- htmltools::renderTags(dashboard_plot_mode_controls(shiny::NS("mod"), plotters = plotters))$html
+    grepl("id=\"mod-use_compatibility_plot\"[^>]*checked", ui_html)
+  }
+
+  testthat::expect_true(compatibility_checked("ggplot"))
+  testthat::expect_false(compatibility_checked("ggrba"))
+  testthat::expect_false(compatibility_checked(c("ggplot", "ggrba")))
+})
+
 testthat::test_that("dashboard_plot_mode_controls exposes a plot-style control only when ggrba is installed", {
   ui_html <- htmltools::renderTags(dashboard_plot_mode_controls(shiny::NS("mod")))$html
 
