@@ -22,10 +22,11 @@
 # launched/sourced with that as the working directory - see app.R).
 #
 # Display names are shared across models wherever the underlying concept and
-# units match (e.g. "Nominal Interest Rate", "Inflation", "Hours Worked" are
-# used by SW and several of the 7 new models alike) - this is what lets the
-# Impulse Response Library overlay the same variable's response across
-# models. `optimal_policy` below still targets SW only (as before) - the 7
+# units match - this is what lets the Impulse Response Library overlay the
+# same variable's response across models. Every DSGE model has "Inflation",
+# "Inflation (year-ended)", "Nominal Interest Rate" (annualised), "Nominal
+# Interest Rate (quarterly)", "Hours Worked" and "Output" (see README.md,
+# "Common variables"). `optimal_policy` below still targets SW (as before) - the 7
 # new models are lightweight textbook models without a natural single choice
 # of policy-relevant loss variables, so Optimal Policy is left un-configured
 # for them; they are fully usable in the Overview/Impulse Response Library/
@@ -68,25 +69,44 @@ dsgemoddash_extra_models <- tribble(
   "Born-Pfeifer (2018)",        "deeppink",       "inputs/BornPfeifer2018MP.json",         "inputs/BornPfeifer2018MP_metadata.xlsx"
 )
 
-
-# Build the dashboard baseline: each metadata variable's own steady-state
-# level, flat over every supplied quarter, with the FRED/SEP baseline
-# (build_us_baseline.R) overwritten in for SW's seven observables. The
-# model-consistent (non-observable) variables have no data counterpart, so
-# they stay at steady state.
-sw_build_baseline <- function(model, dates) {
+# Each model variable's own steady-state level (in display units), named by
+# display name. Derived metadata rows (e.g. "Nominal Interest Rate
+# (quarterly)") are left out: `import_baseline()` computes them from their
+# source column.
+dsgemoddash_steady_state_values <- function(model) {
   steady_state <- as.numeric(model$oo_$dr$ys)
   names(steady_state) <- model$M_$endo.names
 
   varmeta <- model$M_$varmeta
+  varmeta <- varmeta[varmeta$dynare_name %in% model$M_$endo.names, ]
   # `scale_factor` is a list column (one value per row, see calc_scale_factors()
   # in rescale_irf.R) - unlist() it to a plain numeric vector before use.
   values <- steady_state[varmeta$dynare_name] * unlist(varmeta$scale_factor)
   names(values) <- varmeta$display_name
+  values
+}
 
+# Convert SW-coded data from model units to display units, using each
+# variable's scale factor (e.g. x 4 to annualise the quarterly `robs`).
+sw_display_units <- function(data, model) {
+  varmeta <- model$M_$varmeta
+  scale <- stats::setNames(unlist(varmeta$scale_factor), varmeta$dynare_name)
+  columns <- intersect(names(data), names(scale))
+  data[columns] <- Map(`*`, data[columns], scale[columns])
+  data
+}
+
+# Build the dashboard baseline: each metadata variable's own steady-state
+# level, flat over every supplied quarter, with the FRED/SEP baseline
+# (build_us_baseline.R) overwritten in for SW's seven observables. The
+# model-consistent (non-observable) variables, including "Output", have no
+# data counterpart, so they stay at steady state.
+sw_build_baseline <- function(model, dates) {
+  values <- dsgemoddash_steady_state_values(model)
   baseline <- tibble(date = dates, !!!as.list(values))
 
   us_data <- openxlsx2::read_xlsx(us_baseline_path, sheet = "baseline") |>
+    sw_display_units(model) |>
     rename(
       `Output Growth` = dy,
       `Consumption Growth` = dc,
@@ -114,14 +134,7 @@ sw_policy_baseline <- function(baseline, model, policy) {
 # these textbook models have no real-world data counterpart (mirrors SW's own
 # steady-state expansion above, minus the historical overlay).
 dsgemoddash_build_synthetic_baseline <- function(model, dates) {
-  steady_state <- as.numeric(model$oo_$dr$ys)
-  names(steady_state) <- model$M_$endo.names
-
-  varmeta <- model$M_$varmeta
-  values <- steady_state[varmeta$dynare_name] * unlist(varmeta$scale_factor)
-  names(values) <- varmeta$display_name
-
-  tibble(date = dates, !!!as.list(values))
+  tibble(date = dates, !!!as.list(dsgemoddash_steady_state_values(model)))
 }
 
 # Left-join `extra` onto `base` by date, keeping only display-name columns
@@ -164,9 +177,11 @@ usa_dashboard <- function() {
   # Policy uses as its longer commitment horizon so `extend_baseline` can
   # stay at its default (identity).
   timeline <- lapply(openxlsx2::read_xlsx(us_baseline_path, sheet = "timeline"), as.Date)
-  # Real-time baselines from past quarters, for timeless commitment. The
-  # earliest sets the earliest commitment start.
-  vintages <- openxlsx2::read_xlsx(us_baseline_path, sheet = "vintages")
+  # Real-time baselines from past quarters, for timeless commitment, in the
+  # same display units as the baseline. The earliest sets the earliest
+  # commitment start.
+  vintages <- openxlsx2::read_xlsx(us_baseline_path, sheet = "vintages") |>
+    sw_display_units(sw_model)
 
   # `import_baseline()`'s `translate_baseline()` step only recognizes columns
   # matching ITS OWN `source_model`'s metadata (columns from other models are
@@ -191,7 +206,10 @@ usa_dashboard <- function() {
     default_baseline = "FRED data + Fed SEP",
     instrument_display_name = "Nominal Interest Rate",
     instrument_shock_name = "Monetary policy shock",
-    irf = list(defaults = list(display_names = "Inflation", horizon = 20)),
+    # The first display name is the Custom IRF mode's default target. The
+    # nominal rate is native to every model, whereas "Inflation" is derived in
+    # some and so can't be targeted.
+    irf = list(defaults = list(display_names = c("Nominal Interest Rate", "Inflation"), horizon = 20)),
     # The 7 curated Pfeifer NK models remain selectable for Alternative Paths
     # (they share "Nominal Interest Rate"/"Monetary policy shock" with SW),
     # but only Smets Wouters (2007) is selected by default - it is the only

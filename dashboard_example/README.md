@@ -93,7 +93,10 @@ Economic Projections (SEP). `inputs/us_baseline.xlsx` has four sheets:
 | `vintages` | `baseline` as known in each of the last 12 quarters | Optimal Policy's timeless commitment |
 
 Quarters are dated the first day of their last month (Q3 = `YYYY-09-01`).
-Growth rates are quarterly log changes x 100, not annualised.
+Growth rates are quarterly log changes x 100, not annualised. The sheets store
+the nominal rate `robs` as Smets and Wouters define it, quarterly (fed funds
+rate / 4); the dashboard shows it annualised (see
+[Common variables](#common-variables)).
 
 ### History
 
@@ -188,6 +191,117 @@ Smets-Wouters' monetary policy shock is always a surprise. Future policy moves
 can't change today's expectations, so commitment, timeless commitment and
 discretion give the same optimal path for SW. They only differ in a model with
 anticipated policy shocks.
+
+## Common variables
+
+Every DSGE model (Smets-Wouters and the 7 Pfeifer models) has these six
+variables under the same name and units, so they can be compared across
+models in the Impulse Response Library and Alternative Paths:
+
+| Display name | Units |
+|---|---|
+| Inflation | Per cent (quarterly) |
+| Inflation (year-ended) | Per cent (year-ended) |
+| Nominal Interest Rate | Per cent (annualized) |
+| Nominal Interest Rate (quarterly) | Per cent (quarterly) |
+| Hours Worked | Per cent deviation from steady state |
+| Output | Per cent deviation from steady state |
+
+Each comes from the model variable below. In every model:
+
+- "Inflation (year-ended)" is the sum of the last four quarters of
+  "Inflation" (the `year_ended_sum` transform).
+- "Nominal Interest Rate" is annualised: the model's quarterly rate (below)
+  with a `scale_formula` of 4. In the US baseline it is the effective fed
+  funds rate. "Nominal Interest Rate (quarterly)" is a derived row that scales
+  it back by 1/4.
+- Every other interest rate is annualised the same way (x 4): the Gali
+  models', Ascari-Sbordone's and Born-Pfeifer's real and natural rates, and
+  SW's model-consistent nominal rate `r`.
+
+Because the policy instrument is annualised, the Alternative Paths sliders,
+Custom IRF targets and Optimal Policy rate settings (loss targets, bounds and
+the 0.1% ELB) are all in annual per cent.
+
+| Model | Inflation | Nominal Interest Rate | Hours Worked | Output |
+|---|---|---|---|---|
+| Smets-Wouters (2007) | `pinfobs` | `robs` | `labobs` | `y` |
+| Gali NK (Ch.3) | `pi` | `i` | `n` | `y` |
+| Gali NK+Wage (Ch.6) | `pi_p` | `i` | `n` | `y` |
+| Gali SOE (Ch.8) | `pi` | `i` | `n` | `y` |
+| Gali Unemployment (2010) | `pi_p` | `ihat` | `nhat` | `y_gap` |
+| Ireland (2004) | `pihat` | `rhat` | `yhat` | `yhat` (Alternative Paths only) |
+| Ascari-Sbordone (2014) | `pi` | `i` x `i_bar` | `N` | `y` |
+| Born-Pfeifer (2018) | `pi_p` | `i` | `n` | `y` |
+
+Where a model's own label differs (e.g. "Price Inflation", "Employment"),
+`build_model_metadata.R` adds the common name as a derived alias row
+(`derived_from`, no transform) and the model's own label stays available.
+
+### Definitions and assumptions
+
+- **Inflation is price inflation.** Gali Ch.6, Gali (2010) and Born-Pfeifer
+  have both price and wage inflation. "Inflation" is price inflation (`pi_p`),
+  like SW's GDP deflator inflation. In the small open economy (Gali Ch.8) it
+  is the model's own inflation variable, CPI inflation. Domestic inflation is
+  still available as "Domestic Inflation".
+- **Year-ended inflation is exact.** Every model's quarterly inflation is a
+  log change in the price level, so the four-quarter sum is exactly the log
+  change over the year. It is not compounded quarterly rates. In the US
+  baseline, the first three quarters of history (1954Q3 to 1955Q1) sum fewer
+  than four quarters, because the history starts in 1954Q3.
+- **Gali Ch.8 hours.** The model labels `n` "employment", but it is the same
+  labour input as Ch.3's hours: both models produce with
+  `y = a + (1 - alpha) * n`.
+- **Gali (2010) hours are employment.** The model has no hours-per-worker
+  margin: employment is the only labour input in production. So hours worked
+  move one-for-one with employment. This is the model's own assumption, not
+  an approximation added here.
+- **Ireland (2004) hours equal detrended output.** Technology is
+  `Y_t = Z_t * h_t` (Ireland 2004, eq. 6), so hours equal output relative to
+  technology, `Y_t / Z_t`. That is the model's `yhat`, for every shock.
+- **Ireland (2004) output is in Alternative Paths only.** `yhat` is output
+  relative to technology `Z_t`, a random walk that only technology shocks
+  move. So `yhat` is the response of output itself to every shock except a
+  technology shock, including the monetary policy shock Alternative Paths
+  uses. After a technology shock it misses the permanent shift in `Z_t`. Its
+  metadata therefore has `irf = FALSE`. When Ireland (2004) is selected, the
+  Impulse Response Library doesn't offer "Output".
+- **Gali (2010)'s `y_gap` is output.** Despite its name, the mod file labels
+  it "output" and defines it with the production function
+  `y_gap = a + (1 - alfa) * nhat`. It was previously mislabelled "Output Gap".
+- **Ascari-Sbordone (2014)'s interest rate is rescaled.** This model is solved
+  in logs of levels, and `i` is the log of the net nominal rate. So its raw
+  response is a proportional change in the rate: a rise from 1% to 1.25%
+  shows as a 25% rise. Its `scale_formula` multiplies by the steady-state net
+  rate `i_bar`, giving the change in the quarterly rate itself, and then by 4
+  to annualise (`4 * i_bar`). That puts it in the same units as every other
+  model's rate. Before this, its Alternative Paths responses were about 100
+  times too small.
+- **Smets-Wouters "Output" has no data.** SW observes only output growth, so
+  "Output" is its model-consistent `y` (previously "Output (model-consistent)").
+  Its baseline stays at steady state (zero), so Alternative Paths shows it as
+  a deviation from baseline.
+
+No model needed output to be approximated by the output gap: each has its own
+output variable.
+
+### Which tabs offer a variable
+
+Three logical columns in each model's variable metadata control where a
+variable appears:
+
+| Column | Tab |
+|---|---|
+| `irf` | Impulse Response Library |
+| `alt_paths` | Alternative Paths |
+| `hsd` | Historical Shock Decomposition |
+
+A blank or missing `irf` or `alt_paths` means the variable is offered. Both
+tabs list only variables offered by every selected model. SW's
+model-consistent series have `alt_paths = FALSE`. So in Alternative Paths, SW
+offers its seven observables, "Inflation (year-ended)", "Nominal Interest
+Rate (quarterly)" and "Output".
 
 ## Files
 
