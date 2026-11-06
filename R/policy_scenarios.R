@@ -837,4 +837,13 @@ ezdyn_policy_timeless <- function(history, dY, weights, discount_factor, constra
   shocks
 }
 
-ezdyn_policy_solve <- function(H, f) as.numeric(tryCatch(solve(H, -f), error = function(...) qr.solve(H, -f)))
+# Solve H %*% shocks = -f. A shock with no effect on the loss (e.g. in the last
+# quarter, when the loss variables only respond with a lag) leaves H singular;
+# such shocks are left at zero.
+ezdyn_policy_solve <- function(H, f) {
+  as.numeric(tryCatch(solve(H, -f), error = function(...) {
+    shocks <- qr.coef(qr(H), -f)
+    shocks[is.na(shocks)] <- 0
+    shocks
+  }))
+}

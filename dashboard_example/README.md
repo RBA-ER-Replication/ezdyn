@@ -206,7 +206,8 @@ start the tab offers.
 Smets-Wouters' monetary policy shock is always a surprise. Future policy moves
 can't change today's expectations, so commitment, timeless commitment and
 discretion give the same optimal path for SW. They only differ in a model with
-anticipated policy shocks.
+anticipated policy shocks. None of the dashboard's models has them, so the tab
+shows one optimal path for each selected model.
 
 ## Semi-structural models
 
@@ -258,16 +259,15 @@ scaled so the fed funds rate peaks 100bp (annualised) above baseline.
 
 - **Impulse Response Library**: responses to the "Monetary policy shock",
   comparable with the other models.
-- **Optimal Policy**: Gertler-Karadi (2015) is the comparison model, so its
-  optimal path under commitment is shown next to SW's. Response variables it
-  lacks are left out. If a loss, constraint or instrument variable it lacks is
-  selected (e.g. wage growth), its path isn't shown and a notice says why.
-  Because output and inflation rise at first after a GK rate rise, its optimal
-  path can move rates the opposite way to SW's in the short run. Beyond the
-  first few years its path is unreliable: with a 40-quarter horizon and no
-  ELB, it keeps cutting, to about -23% by quarter 40, because cuts that late
-  only take effect after the loss horizon ends. Turn on the ELB or shorten the
-  horizons when comparing with it.
+- **Optimal Policy**: Gertler-Karadi (2015) is selected by default alongside
+  SW, so its optimal path is shown next to SW's. While it is selected, the
+  tab doesn't offer response or loss variables it lacks (e.g. real wage
+  growth). Because output and inflation rise at first after a GK rate rise,
+  its optimal path can move rates the opposite way to SW's in the short run.
+  Beyond the first few years its path is unreliable: with a 40-quarter horizon
+  and no ELB, it keeps cutting, to about -23% by quarter 40, because cuts that
+  late only take effect after the loss horizon ends. Turn on the ELB or shorten
+  the horizons when comparing with it.
 - **Alternative Paths**: selectable, but not selected by default. Treat their
   results with caution. The tab hits the rate path with a fresh surprise shock
   each quarter, and both estimated rate responses peak after impact, so
@@ -391,6 +391,21 @@ tabs list only variables offered by every selected model. SW's
 model-consistent series have `alt_paths = FALSE`. So in Alternative Paths, SW
 offers its seven observables, "Inflation (year-ended)", "Nominal Interest
 Rate (quarterly)" and "Output".
+
+### Unit symbols
+
+The build scripts set each variable's plot axis symbols from its `units`:
+
+| Units | `unit_symbol_irf` | `unit_symbol_baseline` |
+|---|---|---|
+| Per cent (quarterly, annualized or year-ended) | ppt | % |
+| Per cent deviation from steady state | % dev | % dev |
+| Percentage points deviation from steady state | ppt | ppt |
+
+Impulse responses use `unit_symbol_irf`, because they are changes from
+baseline: a rate moves in percentage points. Alternative Paths use
+`unit_symbol_baseline`, because they plot levels: a rate is a per cent.
+`build_model_metadata.R` stops if a variable has units without a symbol.
 
 ## Files
 

@@ -226,6 +226,26 @@ testthat::test_that("timeless policy history ignores dates outside its required 
   testthat::expect_equal(unname(actual["infl_obs", , 1]), 1:3)
 })
 
+testthat::test_that("commitment leaves a policy shock with no effect on the loss at zero", {
+  # The second shock arrives in the last period and the loss variable only
+  # responds with a lag, so it can't affect the loss.
+  dY <- array(
+    c(1, 1, 0, 0),
+    dim = c(1, 2, 2),
+    dimnames = list("infl_obs", NULL, NULL)
+  )
+
+  shocks <- ezdyn_policy_commit(
+    Y0 = matrix(c(1, 1), nrow = 1, dimnames = list("infl_obs", NULL)),
+    dY = dY,
+    weights = 1,
+    discount_factor = 1,
+    constraints = list(A_ineq = matrix(0, 0, 2), b_ineq = numeric())
+  )
+
+  testthat::expect_equal(shocks, c(-1, 0))
+})
+
 testthat::test_that("discretionary policy implements time-varying lower bounds", {
   dY <- array(
     c(1, 0, 0, 1),

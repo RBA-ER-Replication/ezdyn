@@ -1,7 +1,7 @@
 Type: Package
 Package: ezdyn
 Title: Tools for Performing Analysis of Linear Dynamic Models Fast
-Version: 0.3.17
+Version: 0.3.18
 Authors@R: c( 
     person("Hamish", "Sullivan", , "sullivanh@rba.gov.au", role = c("aut", "cre")),
     person("Callum", "Ryan", , "ryanca@rba.gov.au", role = c("ctb")),

@@ -4,14 +4,18 @@
 \alias{optimal_policy_loss_choices}
 \title{Return the configured loss variables offered by the Optimal Policy tab.}
 \usage{
-optimal_policy_loss_choices(config)
+optimal_policy_loss_choices(config, models = NULL)
 }
 \arguments{
 \item{config}{Validated dashboard configuration.}
+
+\item{models}{Optional named list of selected policy-model MOO pairs.}
 }
 \value{
 Named character vector.
 }
 \description{
-Return the configured loss variables offered by the Optimal Policy tab.
+With \code{models}, only the loss variables every selected model provides are
+returned, so a selection can't fail for a model that lacks one (e.g. a
+display name only some models define).
 }

@@ -43,6 +43,23 @@ library(tibble)
 library(jsonlite)
 library(writexl)
 
+# Plot axis unit symbols for each `units` value. An impulse response is a
+# change from baseline (`unit_symbol_irf`), so a rate moves in percentage
+# points. Alternative Paths plot levels (`unit_symbol_baseline`), so a rate is
+# a per cent. A deviation from steady state reads the same either way.
+unit_symbol_cols <- function(units) {
+  is_rate <- grepl("^Per cent \\(", units)
+  irf <- case_when(
+    is_rate ~ "ppt",
+    units == "Per cent deviation from steady state" ~ "% dev",
+    units == "Percentage points deviation from steady state" ~ "ppt"
+  )
+  if (anyNA(irf)) {
+    stop("No unit symbols for units: ", paste(unique(units[is.na(irf)]), collapse = ", "))
+  }
+  tibble(unit_symbol_irf = irf, unit_symbol_baseline = if_else(is_rate, "%", irf))
+}
+
 # Fill in the metadata columns ezdyn reads, keeping any value a row already
 # sets (e.g. a derived row's `derived_from`). None of the 7 Pfeifer models
 # has smoothed historical data, so `hsd` defaults to FALSE.
@@ -60,7 +77,9 @@ common_cols <- function(df) {
     value <- if (col %in% names(df)) df[[col]] else NA
     df[[col]] <- coalesce(value, defaults[[col]])
   }
-  df
+  df |>
+    bind_cols(unit_symbol_cols(df$units)) |>
+    relocate(unit_symbol_irf, unit_symbol_baseline, .after = units)
 }
 
 # Insert `rows` directly after the row for model variable `after`. The

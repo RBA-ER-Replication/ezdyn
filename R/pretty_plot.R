@@ -244,6 +244,23 @@ ezdyn_line_label_linetypes <- function(colour_values, baseline_name) {
 	linetypes[names(colour_values)]
 }
 
+# Label each ggplot2 facet panel with its display name, and its display unit
+# and unit symbol on a second line, leaving out whichever is empty. Units are
+# looked up per display name (`unit_symbols` from `irf_build_unit_symbols()`),
+# not per row, so a row with a blank unit can't split a variable's panel.
+ezdyn_facet_unit_labels <- function(df, unit_symbols) {
+	display_units <- tibble::tibble(display_name = df$display_name, display_unit = df$display_unit) |>
+		dplyr::group_by(display_name) |>
+		dplyr::summarise(display_unit = irf_pick_first_nonempty(display_unit), .groups = "drop")
+	display_unit <- display_units$display_unit[match(df$display_name, display_units$display_name)]
+	unit_symbol <- unname(unlist(unit_symbols)[df$display_name])
+	unit_text <- purrr::map2_chr(display_unit, unit_symbol, function(unit, symbol) {
+		units <- c(unit, symbol)
+		paste(units[!is.na(units) & nzchar(units)], collapse = ", ")
+	})
+	ifelse(nzchar(unit_text), paste0(df$display_name, "\n", unit_text), df$display_name)
+}
+
 # Omit overlapping Date labels at the rendered width.
 ezdyn_alt_path_date_scale <- function() {
 	ggplot2::scale_x_date(
@@ -326,12 +343,7 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 			(if (is_alt_path) ggplot2::geom_blank() else ggplot2::geom_hline(yintercept=0)) +
 			ggrba::legend_rba()
 	} else {
-		df_plot$display_name_unit <- sprintf(
-			"%s (%s, %s)",
-			df_plot$display_name,
-			df_plot$display_unit,
-			df_plot[[unit_column]]
-		)
+		df_plot$display_name_unit <- ezdyn_facet_unit_labels(df_plot, unit_symbols)
 		graph <- ggplot2::ggplot(df_plot) +
 			(if (is_alt_path) ezdyn_alt_path_date_scale() else ggplot2::geom_hline(yintercept = 0)) +
 			ggplot2::scale_y_continuous(breaks = y_breaks_common) +

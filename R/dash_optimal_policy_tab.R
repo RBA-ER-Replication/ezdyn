@@ -19,10 +19,22 @@ optimal_policy_response_choices <- function(models) {
 
 #' Return the configured loss variables offered by the Optimal Policy tab.
 #'
+#' With `models`, only the loss variables every selected model provides are
+#' returned, so a selection can't fail for a model that lacks one (e.g. a
+#' display name only some models define).
+#'
 #' @param config Validated dashboard configuration.
+#' @param models Optional named list of selected policy-model MOO pairs.
 #' @return Named character vector.
-optimal_policy_loss_choices <- function(config) {
-  config$optimal_policy$loss_variable_choices
+optimal_policy_loss_choices <- function(config, models = NULL) {
+  choices <- config$optimal_policy$loss_variable_choices
+  provided <- vapply(choices, function(variable) {
+    all(vapply(models, function(model) {
+      resolved <- tryCatch(ezdyn_resolve_policy_variable_names(variable, model$M_), error = function(e) NULL)
+      !is.null(resolved)
+    }, logical(1)))
+  }, logical(1))
+  choices[provided]
 }
 
 # Return the initial policy plot range as two years before and after the forecast start.
@@ -218,7 +230,7 @@ UITab_OptimalPolicy <- function(id, config) {
   model_choices <- irf_choices(policy$models)
   selected_models <- irf_preserve_selection(policy$defaults$models, model_choices)
   choices <- optimal_policy_response_choices(config$models[selected_models])
-  loss_choices <- optimal_policy_loss_choices(config)
+  loss_choices <- optimal_policy_loss_choices(config, config$models[selected_models])
   policy_dates <- seq(policy$forecast_start, policy$forecast_end, by = "quarter")
   plot_range <- optimal_policy_default_plot_range(config$timeline, policy$forecast_end)
   description <- if (is.function(policy$description_ui)) policy$description_ui() else optimal_policy_generic_description()
@@ -327,6 +339,7 @@ ServerTab_OptimalPolicy <- function(id, config) {
       config$models[input$models]
     })
     responses <- shiny::reactive(optimal_policy_response_choices(selected_models()))
+    loss_choices <- shiny::reactive(optimal_policy_loss_choices(config, selected_models()))
     shiny::observeEvent(input$models, {
       shiny::updateSelectizeInput(
         session,
@@ -334,6 +347,13 @@ ServerTab_OptimalPolicy <- function(id, config) {
         choices = responses(),
         selected = irf_preserve_selection(input$response_variables, responses()),
         server = TRUE
+      )
+      # Drop, rather than replace, loss variables the new selection lacks.
+      shiny::updateSelectizeInput(
+        session,
+        "loss_variables",
+        choices = loss_choices(),
+        selected = intersect(input$loss_variables, loss_choices())
       )
     }, ignoreInit = TRUE)
     baseline_registry <- shiny::reactiveVal(config$baselines)

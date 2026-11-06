@@ -78,6 +78,14 @@ variables <- tribble(
     derived_from = as.character(derived_from),
     derived_transform = as.character(derived_transform),
     default = TRUE
+  ) |>
+  # Plot axis unit symbols, as in build_model_metadata.R: impulse responses
+  # are changes from baseline, so rates move in percentage points, while
+  # Alternative Paths plot levels, so rates are per cent.
+  mutate(
+    unit_symbol_irf = if_else(units == "Per cent deviation from steady state", "% dev", "ppt"),
+    unit_symbol_baseline = if_else(units == "Per cent deviation from steady state", "% dev", "%"),
+    .after = units
   )
 
 write.csv(irfs, "inputs/semi_structural_irfs.csv", row.names = FALSE)

@@ -150,6 +150,20 @@ testthat::test_that("Optimal Policy loss-variable inputs use configured target/w
   testthat::expect_match(fallback_html, "value=\"1\"")
 })
 
+testthat::test_that("Optimal Policy only offers loss variables every selected model has", {
+  choices <- c("Inflation" = "Inflation", "GDP growth" = "GDP Growth", "Cash rate" = "r_obs")
+  config <- list(optimal_policy = list(loss_variable_choices = choices))
+  with_growth <- dashboard_test_model("WithGrowth", include_gdp_growth = TRUE)
+  without_growth <- dashboard_test_model("WithoutGrowth")
+
+  testthat::expect_equal(optimal_policy_loss_choices(config), choices)
+  testthat::expect_equal(optimal_policy_loss_choices(config, list(WithGrowth = with_growth)), choices)
+  testthat::expect_equal(
+    optimal_policy_loss_choices(config, list(WithGrowth = with_growth, WithoutGrowth = without_growth)),
+    c("Inflation" = "Inflation", "Cash rate" = "r_obs")
+  )
+})
+
 testthat::test_that("Optimal Policy weight/target ids and lookups agree when choice values are display names", {
   config <- list(optimal_policy = list(
     loss_variable_choices = c("Inflation (year-ended)" = "Inflation (year-ended)"),

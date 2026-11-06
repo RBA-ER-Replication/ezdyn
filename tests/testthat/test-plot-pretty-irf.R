@@ -109,6 +109,28 @@ testthat::test_that("plot_pretty honours a model's configured line colour, falli
 	testthat::expect_false(identical(palette[["Lower rates (MARTIN)"]], "firebrick"))
 })
 
+testthat::test_that("plot_pretty labels ggplot2 facets with only the non-empty units", {
+	irf <- tibble::tibble(
+		t = rep(1:2, 3),
+		shock = "Monetary policy shock",
+		dynare_name = rep(c("pinfobs", "pi", "y"), each = 2),
+		display_name = rep(c("Inflation", "Inflation", "Output"), each = 2),
+		display_unit = rep(c("Per cent (quarterly)", "Per cent (quarterly)", "Per cent deviation from steady state"), each = 2),
+		# One Inflation model has no unit symbol; Output has none at all.
+		unit_symbol_irf = rep(c("ppt", "", ""), each = 2),
+		unit_symbol_baseline = "",
+		model_name = rep(c("SW", "Gali", "SW"), each = 2),
+		value = c(0.1, 0.2, 0.1, 0.1, -0.3, -0.2)
+	)
+
+	actual <- plot_pretty(irf, plotter = "ggplot")
+
+	testthat::expect_setequal(
+		unique(actual$graph$data$display_name_unit),
+		c("Inflation\nPer cent (quarterly), ppt", "Output\nPer cent deviation from steady state")
+	)
+})
+
 testthat::test_that("plot_pretty validates Dynare-name selection and duplicate Baselines", {
 	pretty <- plot_pretty_irf_fixture()
 	duplicate <- dplyr::bind_rows(
