@@ -293,6 +293,162 @@ ezdyn_resolve_plotter <- function(plotter = NULL, ggrba_available = requireNames
 	plotter
 }
 
+# ggplot2 fallback layout ---------------------------------------------------
+
+# Character budgets for wrapping text in ggplot2 fallback charts. ggplot2
+# never wraps text or shrinks a legend, so anything wider than the canvas is
+# clipped. Dashboard charts are drawn from about 5.4 in wide
+# (shiny::renderPlot() in a 392 px column at 72 dpi) up to 7 in
+# (ezdyn_ggsave()); these budgets fit the narrowest canvas at the text sizes
+# set by ezdyn_ggplot_layout_theme(), at about 0.55 em per character.
+# `legend` and `strip` are budgets for a whole row, shared between columns.
+ezdyn_ggplot_wrap_widths <- function() {
+	list(title = 40, subtitle = 52, caption = 74, legend = 60, strip = 54)
+}
+
+# Wrap every line of each string at word boundaries to at most `width`
+# characters, keeping existing line breaks (strwrap() alone would merge them).
+# `balance = TRUE` evens out the wrapped lines (for titles), so a long title
+# splits into two similar halves rather than leaving one word on its own line.
+ezdyn_wrap_text <- function(x, width, balance = FALSE) {
+	if (is.null(x)) {
+		return(x)
+	}
+	wrap_line <- function(line) {
+		if (!nzchar(trimws(line))) {
+			return("")
+		}
+		wrapped <- strwrap(line, width = width + 1)
+		if (balance && length(wrapped) > 1) {
+			for (w in seq.int(min(width, ceiling(nchar(line) / length(wrapped))), width)) {
+				candidate <- strwrap(line, width = w + 1)
+				if (length(candidate) == length(wrapped)) {
+					return(candidate)
+				}
+			}
+		}
+		wrapped
+	}
+	vapply(as.character(x), function(s) {
+		if (is.na(s) || !nzchar(s)) {
+			return(s)
+		}
+		lines <- strsplit(s, "\n", fixed = TRUE)[[1]]
+		paste(unlist(lapply(lines, wrap_line)), collapse = "\n")
+	}, character(1), USE.NAMES = FALSE)
+}
+
+# Model behind each legend key, or NA (e.g. the shared Baseline).
+ezdyn_line_label_models <- function(df, line_labels) {
+	if (!all(c("line_label", "model_name") %in% names(df))) {
+		return(rep(NA_character_, length(line_labels)))
+	}
+	lookup <- unique(data.frame(
+		line_label = as.character(df$line_label),
+		model_name = as.character(df$model_name),
+		stringsAsFactors = FALSE
+	))
+	lookup$model_name[match(as.character(line_labels), lookup$line_label)]
+}
+
+# Lay out a bottom legend so it fits the narrowest dashboard canvas.
+# irf_add_line_labels() builds multi-model keys as "<series> (<model>)", so a
+# key that is too long wraps before its model ("<series>" / "(<model>)"). When
+# every key shares one series (one shock across several IRF models), that
+# series becomes the legend title and each key shows only its model. The
+# column count is the one (1 to 4) whose wrapped labels take the fewest text
+# lines; ties go to the layout with the least wrapping.
+# Returns list(labels = display labels in key order, ncol, title).
+ezdyn_legend_layout <- function(line_labels, model_names = NULL,
+                                row_chars = ezdyn_ggplot_wrap_widths()$legend,
+                                key_chars = 5, max_ncol = 4) {
+	line_labels <- as.character(line_labels)
+	n <- length(line_labels)
+	if (n == 0) {
+		return(list(labels = character(), ncol = 1L, title = NULL))
+	}
+	if (is.null(model_names)) {
+		model_names <- rep(NA_character_, n)
+	}
+	suffix <- paste0(" (", model_names, ")")
+	has_model <- !is.na(model_names) & endsWith(line_labels, suffix) & nchar(line_labels) > nchar(suffix)
+	series <- ifelse(has_model, substr(line_labels, 1, nchar(line_labels) - nchar(suffix)), NA_character_)
+	keys <- line_labels
+	title <- NULL
+	if (n > 1 && all(has_model) && length(unique(series)) == 1) {
+		title <- ezdyn_wrap_text(series[[1]], row_chars)
+		keys <- model_names
+		has_model <- rep(FALSE, n)
+	}
+	wrap_keys <- function(width) {
+		vapply(seq_len(n), function(i) {
+			key <- keys[[i]]
+			if (nchar(key) <= width) {
+				return(key)
+			}
+			if (has_model[[i]]) {
+				key <- paste0(series[[i]], "\n(", model_names[[i]], ")")
+			}
+			ezdyn_wrap_text(key, width)
+		}, character(1))
+	}
+	best <- NULL
+	for (ncol in seq_len(min(max_ncol, n))) {
+		width <- floor(row_chars / ncol) - key_chars
+		if (width < 8) {
+			break
+		}
+		wrapped <- wrap_keys(width)
+		lines <- strsplit(wrapped, "\n", fixed = TRUE)
+		if (ncol > 1 && max(nchar(unlist(lines))) > width) {
+			next
+		}
+		n_lines <- lengths(lines)
+		rows <- split(n_lines, ceiling(seq_len(n) / ncol))
+		candidate <- list(
+			labels = wrapped, ncol = ncol, title = title,
+			height = sum(vapply(rows, max, numeric(1))), total = sum(n_lines)
+		)
+		if (is.null(best) || candidate$height < best$height ||
+			(candidate$height == best$height && candidate$total < best$total)) {
+			best <- candidate
+		}
+	}
+	if (is.null(best)) {
+		return(list(labels = keys, ncol = 1L, title = title))
+	}
+	best[c("labels", "ncol", "title")]
+}
+
+# Text sizes and placement for ggplot2 fallback charts, layered over
+# theme_classic() and ezdyn_plot_size_rba(), whose 28 pt title / 20 pt
+# subtitle / 16 pt caption are sized for a 190 mm print chart. Legends always
+# sit below the panels (a right-hand legend squeezed single-panel charts), and
+# the title and caption span the whole plot rather than only the panels.
+ezdyn_ggplot_layout_theme <- function() {
+	ggplot2::theme(
+		plot.title = ggplot2::element_text(size = 16.5, hjust = 0.5, lineheight = 0.95),
+		plot.subtitle = ggplot2::element_text(size = 13, hjust = 0.5, lineheight = 0.95),
+		plot.title.position = "plot",
+		plot.caption = ggplot2::element_text(size = 10, hjust = 0, vjust = 1, lineheight = 1,
+		                                     margin = ggplot2::margin(t = 6)),
+		plot.caption.position = "plot",
+		# The extra right margin keeps the last date label inside the canvas.
+		plot.margin = ggplot2::margin(6, 14, 6, 6),
+		strip.text = ggplot2::element_text(size = 10, lineheight = 0.95),
+		legend.position = "bottom",
+		legend.box = "vertical",
+		legend.byrow = TRUE,
+		legend.title = ggplot2::element_text(size = 11),
+		legend.title.position = "top",
+		legend.text = ggplot2::element_text(size = 11, lineheight = 0.95),
+		legend.key.height = grid::unit(1, "lines"),
+		legend.key.spacing.y = grid::unit(1, "pt"),
+		legend.margin = ggplot2::margin(0, 0, 0, 0),
+		legend.box.spacing = grid::unit(6, "pt")
+	)
+}
+
 #' Build a graph from pretty IRF or alternative-path data.
 #'
 #' @param df Data frame created by [pretty_irf()] or [get_alt_paths()].
@@ -319,6 +475,7 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 	response_vars <- unique(df$display_name)
 	unit_symbols <- irf_build_unit_symbols(df)
 	subtitle_ <- unique(df$display_unit)
+	wrap_widths <- ezdyn_ggplot_wrap_widths()
 	df_plot <- df |>
 		dplyr::filter(!is.na(value))
 	if (is_alt_path) {
@@ -349,7 +506,8 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 			ggplot2::scale_y_continuous(breaks = y_breaks_common) +
 			ggplot2::labs(x = if (is_alt_path) NULL else "Quarter") +
 			ggplot2::theme_classic(base_size = 11 * 1.25) +
-			ezdyn_plot_size_rba()
+			ezdyn_plot_size_rba() +
+			ezdyn_ggplot_layout_theme()
 	}
 
 	line_layer <- if (is_alt_path || line_style == "combined") {
@@ -390,24 +548,46 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 			}
 			values
 		}
+		# ggplot2 never wraps a legend, so the ggplot backend lays it out to
+		# fit (ezdyn_legend_layout()); ggrba keeps its own legend styling.
+		legend_layout <- if (plotter == "ggplot") {
+			key_models <- if (is_alt_path || line_style == "combined") ezdyn_line_label_models(df_plot, colour_levels) else NULL
+			ezdyn_legend_layout(colour_levels, key_models)
+		} else {
+			NULL
+		}
+		legend_guide <- if (is.null(legend_layout)) {
+			ggplot2::guide_legend(title = NULL)
+		} else {
+			ggplot2::guide_legend(title = legend_layout$title, ncol = legend_layout$ncol)
+		}
+		legend_key_labels <- if (is.null(legend_layout)) ggplot2::waiver() else legend_layout$labels
 		graph <- graph +
 			ggplot2::scale_colour_manual(
 				values = colour_values,
 				breaks = colour_levels,
+				labels = legend_key_labels,
 				drop = FALSE,
 				name = NULL
 			) +
-			ggplot2::guides(colour = ggplot2::guide_legend(title = NULL))
+			ggplot2::guides(colour = legend_guide)
 		if (is_alt_path) {
 			linetype_values <- ezdyn_line_label_linetypes(colour_values, baseline_name)
+			# Same labels and guide as the colour scale, so the two legends merge.
 			graph <- graph +
 				ggplot2::scale_linetype_manual(
 					values = linetype_values,
 					breaks = colour_levels,
+					labels = legend_key_labels,
 					drop = FALSE,
 					name = NULL
 				) +
-				ggplot2::guides(linetype = ggplot2::guide_legend(title = NULL))
+				ggplot2::guides(linetype = legend_guide)
+		} else if (plotter == "ggplot" && line_style == "split") {
+			model_layout <- ezdyn_legend_layout(unique(df_plot$model_name))
+			graph <- graph +
+				ggplot2::scale_linetype_discrete(labels = stats::setNames(model_layout$labels, unique(df_plot$model_name))) +
+				ggplot2::guides(linetype = ggplot2::guide_legend(title = NULL, ncol = model_layout$ncol))
 		}
 	}
 
@@ -427,8 +607,8 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 		} else {
 			graph <- graph +
 				ggplot2::labs(
-					title=custom_title,
-					subtitle=subtitle_,
+					title=ezdyn_wrap_text(custom_title, wrap_widths$title, balance = TRUE),
+					subtitle=ezdyn_wrap_text(subtitle_, wrap_widths$subtitle, balance = TRUE),
 					y=unit_labels
 				)
 		}
@@ -443,13 +623,20 @@ plot_pretty_graph <- function(df, line_style=c("combined", "split"),
 				ggrba::multipanel_title_rba(title=custom_title) +
 				ggrba::multipanel_legend_rba()
 		} else {
+			# Wrap each strip label to its share of the row: three panels share
+			# one row, so long unit lines such as "Per cent deviation from steady
+			# state" would otherwise overflow their strips.
+			strip_width <- floor(wrap_widths$strip / min(3L, length(response_vars)))
 			graph <- graph +
-				ggplot2::facet_wrap(~display_name_unit, scales = "free_y", ncol = 3) +
+				ggplot2::facet_wrap(
+					~display_name_unit, scales = "free_y", ncol = 3,
+					labeller = ggplot2::as_labeller(function(x) ezdyn_wrap_text(x, strip_width))
+				) +
 				#ggplot2::geom_text(ggplot2::aes(x=3, y=(ceiling(length(unique(df$display_name_unit))/3)), label=unit_symbol_irf, fontface='bold', size=4)) +
-				ggplot2::labs(title = custom_title) +
+				# Units are in each strip, so drop the meaningless "value" y label.
+				ggplot2::labs(title = ezdyn_wrap_text(custom_title, wrap_widths$title, balance = TRUE), y = NULL) +
 				ggplot2::theme(
-					panel.spacing.y = grid::unit(1.2, "lines"),
-					legend.position = "bottom"
+					panel.spacing.y = grid::unit(1.2, "lines")
 				)
 		}
 	}

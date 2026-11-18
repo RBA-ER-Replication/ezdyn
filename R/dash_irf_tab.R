@@ -452,7 +452,7 @@ ServerTab_IRF <- function(id, config) {
           # passing a pre-joined single string would register every note as
           # one combined footnote instead. ggplot2::labs() only ever takes a
           # single caption string, so join with newlines there instead.
-          if (plotter == "ggrba") ggrba::footnote_rba(footnotes) else ggplot2::labs(caption = paste(footnotes, collapse = "\n"))
+          if (plotter == "ggrba") ggrba::footnote_rba(footnotes) else dashboard_ggplot_caption(footnotes)
         )
       }
       out

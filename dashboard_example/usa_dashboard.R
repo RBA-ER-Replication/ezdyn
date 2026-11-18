@@ -78,6 +78,34 @@ semi_structural_models <- tribble(
   "Gertler-Karadi (2015)",   "darkcyan"
 )
 
+# Alternative Paths has one slider per forecast quarter. Show the first 10
+# quarters of the forecast rather than the full SEP horizon.
+alt_paths_quarters <- 10
+
+# Buttons under the dashboard title. The whitepaper link downloads the PDF;
+# "Report issue" opens a new GitHub issue.
+ezdyn_github_url <- "https://github.com/RBA-ER-Replication/ezdyn"
+whitepaper_url <- paste0(ezdyn_github_url, "/blob/main/ezdyn.pdf?raw=true")
+feedback_url <- paste0(ezdyn_github_url, "/issues/new")
+
+# Shown once when a session starts.
+usa_startup_modal <- shiny::modalDialog(
+  title = "ezdyn Dashboard (USA): beta",
+  shiny::p("This dashboard is a beta version of the ezdyn tool."),
+  shiny::p(
+    "The example code that loads models from Johannes Pfeifer's ",
+    shiny::a("DSGE_mod", href = "https://github.com/JohannesPfeifer/DSGE_mod", target = "_blank", .noWS = "outside"),
+    " collection is experimental. Treat the results from those models as indicative only."
+  ),
+  shiny::p(
+    "Feedback is welcome: please ",
+    shiny::a("raise an issue on GitHub", href = "https://github.com/RBA-ER-Replication/ezdyn/issues", target = "_blank", .noWS = "outside"),
+    "."
+  ),
+  footer = shiny::modalButton("Continue"),
+  easyClose = TRUE
+)
+
 
 # Each model variable's own steady-state level (in display units), named by
 # display name. Derived metadata rows (e.g. "Nominal Interest Rate
@@ -180,11 +208,12 @@ usa_dashboard <- function() {
   # baselines below, so they need no baseline of their own.
   models <- c(list(`Smets Wouters (2007)` = sw_model), extra_models, semi_structural)
 
-  # Data/forecast dates determined by build_us_baseline.R. The baseline runs
-  # past `forecast_end` (the SEP horizon) out to `data_end`, which Optimal
-  # Policy uses as its longer commitment horizon so `extend_baseline` can
-  # stay at its default (identity).
+  # Data/forecast dates determined by build_us_baseline.R, with the forecast
+  # (the Alternative Paths window) cut to `alt_paths_quarters`. The baseline
+  # runs on to `data_end`, which Optimal Policy uses as its longer commitment
+  # horizon so `extend_baseline` can stay at its default (identity).
   timeline <- lapply(openxlsx2::read_xlsx(us_baseline_path, sheet = "timeline"), as.Date)
+  timeline$forecast_end <- seq(timeline$forecast_start, by = "quarter", length.out = alt_paths_quarters)[[alt_paths_quarters]]
   # Real-time baselines from past quarters, for timeless commitment, in the
   # same display units as the baseline. The earliest sets the earliest
   # commitment start.
@@ -213,6 +242,11 @@ usa_dashboard <- function() {
     baselines = list(`FRED data + Fed SEP` = baseline),
     default_baseline = "FRED data + Fed SEP",
     instrument_display_name = "Nominal Interest Rate",
+    header_links = c(
+      "Read the whitepaper" = whitepaper_url,
+      "Report issue" = feedback_url
+    ),
+    startup_modal = usa_startup_modal,
     # The first display name is the Custom IRF mode's default target. The
     # nominal rate is native to every model, whereas "Inflation" is derived in
     # some and so can't be targeted.

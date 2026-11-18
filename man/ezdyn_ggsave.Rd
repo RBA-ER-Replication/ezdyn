@@ -4,7 +4,7 @@
 \alias{ezdyn_ggsave}
 \title{Save a dashboard plot, matching the renderer used to build it.}
 \usage{
-ezdyn_ggsave(file, plot, plotter = NULL)
+ezdyn_ggsave(file, plot, plotter = NULL, width = 7, height = 6, dpi = 300)
 }
 \arguments{
 \item{file}{Output file path.}
@@ -13,13 +13,26 @@ ezdyn_ggsave(file, plot, plotter = NULL)
 
 \item{plotter}{Plotting backend used to build `plot`. `NULL` (default)
 resolves via [ezdyn_resolve_plotter()].}
+
+\item{width, height}{Width and minimum height in inches of a ggplot2 chart
+(ignored for `ggrba`).}
+
+\item{dpi}{Resolution of raster files such as PNG.}
 }
 \value{
-Invisibly, `NULL`.
+Invisibly, the saved size as `list(width, height)` in inches for a
+  ggplot2 chart, or `NULL` for `ggrba`.
 }
 \description{
 `plotter` should match whichever backend built `plot` (e.g. the value
 returned by [dashboard_selected_plotter()]), not be re-derived from `plot`
 itself, since a plain ggplot2 object cannot be distinguished from one built
 by [plot_pretty()] with `plotter = "ggplot"`.
+}
+\details{
+A ggplot2 chart is saved `width` inches wide and at least `height` inches
+tall: taller when its legend and footnotes need the room (see
+[ezdyn_ggplot_height()]). Its size therefore never depends on whichever
+graphics device happens to be open. `ggrba` charts are saved by
+`ggrba::ggsave_rba()` at its own size.
 }

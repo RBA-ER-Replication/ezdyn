@@ -19,6 +19,11 @@ setwd("dashboard/DSGEModDash")
 source("app.R")
 ```
 
+The dashboard opens with a disclaimer: it is a beta, and the code that loads
+the DSGE_mod models is experimental, so their results are indicative only.
+Buttons under the title download the ezdyn whitepaper (`ezdyn.pdf` from
+GitHub) and open a new GitHub issue to report a problem.
+
 ## First-time setup
 
 Run these steps from a clone of this repository, with MATLAB (+ Dynare) and R
@@ -187,8 +192,9 @@ For series the SEP doesn't cover:
 
 - `data_start`: first quarter of history.
 - `forecast_start`: first quarter after the last quarter of data.
-- `forecast_end`: Q4 of the last SEP projection year, the Alternative Paths
-  forecast window.
+- `forecast_end`: Q4 of the last SEP projection year. `usa_dashboard.R`
+  shortens the forecast to its first 10 quarters (`alt_paths_quarters`): the
+  Alternative Paths window, with one slider per quarter.
 - `data_end`: end of the longer-run extension, the Optimal Policy horizon.
 
 ### Vintages

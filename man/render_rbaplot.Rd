@@ -4,7 +4,14 @@
 \alias{render_rbaplot}
 \title{Render a dashboard plot in a temporary image file.}
 \usage{
-render_rbaplot(plt, file_ext = ".png", plotter = NULL)
+render_rbaplot(
+  plt,
+  file_ext = ".png",
+  plotter = NULL,
+  width = 800,
+  height = 400,
+  pixelratio = 1
+)
 }
 \arguments{
 \item{plt}{A ggplot-compatible plot object.}
@@ -13,11 +20,22 @@ render_rbaplot(plt, file_ext = ".png", plotter = NULL)
 
 \item{plotter}{Plotting backend used to build `plt`. `NULL` (default)
 resolves via [ezdyn_resolve_plotter()].}
+
+\item{width}{Output width in CSS pixels.}
+
+\item{height}{Minimum output height in CSS pixels.}
+
+\item{pixelratio}{Browser device pixel ratio
+(`session$clientData$pixelratio`).}
 }
 \value{
 A list accepted by [shiny::renderImage()].
 }
 \description{
-Uses a PNG because it preserves the reviewed dashboard chart proportions.
-This is the default renderer for dashboard plot modules.
+This is the default renderer for dashboard plot modules. A ggplot2 chart is
+drawn at the output's own width in CSS pixels, at 72 dpi as
+[shiny::renderPlot()] draws (times `pixelratio` for high-DPI screens), so it
+looks the same as in compatibility mode. It is `height` pixels tall, or
+taller when its legend and footnotes need the room. A `ggrba` chart keeps
+the proportions `ggrba::ggsave_rba()` gives it.
 }

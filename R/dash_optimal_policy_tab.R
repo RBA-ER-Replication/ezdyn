@@ -250,6 +250,14 @@ UITab_OptimalPolicy <- function(id, config) {
         multiple = TRUE
       ),
       shiny::numericInput(ns("lambda"), shiny::tagList("Anticipation Parameter", help_button(ns("help_cd"))), policy$lambda, min = 0, max = 1, step = 0.1),
+      shiny::h4("Baseline details"),
+      shiny::selectInput(
+        ns("baseline_name"),
+        "Baseline:",
+        choices = names(config$baselines),
+        selected = config$default_baseline
+      ),
+      shiny::tags$p(shiny::strong("Active baseline: "), shiny::textOutput(ns("active_baseline"), inline = TRUE)),
       shiny::h4("Strategy details"),
       shiny::checkboxGroupInput(
         ns("strategy_modes"),
@@ -260,13 +268,6 @@ UITab_OptimalPolicy <- function(id, config) {
       shiny::selectizeInput(ns("loss_variables"), shiny::tagList("Loss function variables", help_button(ns("help_loss_variables"))), loss_choices, multiple = TRUE, selected = intersect(policy$default_loss_variables, loss_choices)),
       optimal_policy_loss_inputs(ns, config),
       dashboard_plot_mode_controls(ns, plotters = config$plotters, advanced_controls = shiny::tagList(
-        shiny::selectInput(
-          ns("baseline_name"),
-          "Baseline:",
-          choices = names(config$baselines),
-          selected = config$default_baseline
-        ),
-        shiny::tags$p(shiny::strong("Active baseline: "), shiny::textOutput(ns("active_baseline"), inline = TRUE)),
         shiny::numericInput(ns("discount_factor"), "Discount factor", 0.99, min = 0, max = 1),
         shiny::numericInput(ns("loss_horizon"), shiny::tagList("Loss evaluation horizon", help_button(ns("help_loss_horizon"))), min(40L, length(policy_dates)), min = 1, max = length(policy_dates)),
         shiny::numericInput(ns("instrument_horizon"), shiny::tagList("Optimisation horizon", help_button(ns("help_instrument_horizon"))), min(40L, length(policy_dates)), min = 1, max = length(policy_dates)),
@@ -578,7 +579,7 @@ ServerTab_OptimalPolicy <- function(id, config) {
           # passing a pre-joined single string would register every note as
           # one combined footnote instead. ggplot2::labs() only ever takes a
           # single caption string, so join with newlines there instead.
-          if (plotter == "ggrba") ggrba::footnote_rba(footnotes) else ggplot2::labs(caption = paste(footnotes, collapse = "\n"))
+          if (plotter == "ggrba") ggrba::footnote_rba(footnotes) else dashboard_ggplot_caption(footnotes)
         )
       }
       out
