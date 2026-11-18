@@ -257,7 +257,6 @@ UITab_OptimalPolicy <- function(id, config) {
         choices = names(config$baselines),
         selected = config$default_baseline
       ),
-      shiny::tags$p(shiny::strong("Active baseline: "), shiny::textOutput(ns("active_baseline"), inline = TRUE)),
       shiny::h4("Strategy details"),
       shiny::checkboxGroupInput(
         ns("strategy_modes"),
@@ -279,7 +278,8 @@ UITab_OptimalPolicy <- function(id, config) {
           shiny::sliderInput(ns("preloss_start"), shiny::tagList("Commitment start", help_button(ns("help_commitment_start"))), min = policy$preloss_start, max = policy$forecast_start, value = policy$preloss_start, timeFormat = "%Y-%m-%d")
         ),
         shiny::sliderInput(ns("date_range"), "Plot range", min = config$timeline$data_start, max = policy$forecast_end, value = plot_range),
-        shinyWidgets::prettySwitch(ns("show_table"), "Show table", FALSE)
+        shinyWidgets::prettySwitch(ns("show_table"), "Show table", FALSE),
+        shiny::tags$p(shiny::strong("Active baseline: "), shiny::textOutput(ns("active_baseline"), inline = TRUE))
       ))
     ),
     shiny::mainPanel(

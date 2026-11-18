@@ -233,6 +233,8 @@ testthat::test_that("Optimal Policy UI uses configured description and a button-
   position <- function(text) regexpr(text, html, fixed = TRUE)
   testthat::expect_true(position("Model details") < position("Baseline details"))
   testthat::expect_true(position("Baseline details") < position("policy-baseline_name"))
+  # The active-baseline line sits at the end of the Advanced options.
+  testthat::expect_true(position("policy-show_table") < position("policy-active_baseline"))
   testthat::expect_true(position("policy-baseline_name") < position("Strategy details"))
   testthat::expect_match(html, "policy-open_upload")
 
