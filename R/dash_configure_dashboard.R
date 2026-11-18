@@ -550,6 +550,19 @@ dashboard_validate_startup_modal <- function(startup_modal) {
   startup_modal
 }
 
+# Validate optional links shown as buttons under the dashboard title: a named
+# character vector of URLs, named by each button's label.
+dashboard_validate_header_links <- function(header_links) {
+  if (is.null(header_links)) {
+    return(NULL)
+  }
+  if (!dashboard_is_named_character(header_links) || anyNA(header_links) || any(header_links == "")) {
+    stop("`header_links` must be NULL or a named character vector of URLs, named by button label.", call. = FALSE)
+  }
+
+  header_links
+}
+
 # Validate the configured allow-list of plotting backends. Explicit and
 # static - not detected from installed packages - so deployments control
 # exactly which backends are offered regardless of what happens to be
@@ -632,6 +645,11 @@ dashboard_validate_plotters <- function(plotters) {
 #'   fallback modal is shown when unset.
 #' @param startup_modal Optional UI returned by [shiny::modalDialog()] to show
 #'   once when a session starts.
+#' @param header_links Optional named character vector of links shown as
+#'   buttons under the dashboard title, e.g.
+#'   `c("Read the whitepaper" = "https://...")`. Names are the
+#'   button labels, and each button opens its link in a new browser tab. `NULL` (the
+#'   default) shows no links.
 #' @param plotters Character vector naming the plotting backends this
 #'   dashboard offers, from `c("ggrba", "ggplot")`. Explicit and static - not
 #'   detected from installed packages - so a deployment controls exactly
@@ -669,6 +687,7 @@ configure_dashboard <- function(
     optimal_policy = NULL,
     help = list(),
     startup_modal = NULL,
+    header_links = NULL,
     plotters = "ggplot") {
   if (!is.character(name) || length(name) != 1 || is.na(name) || name == "") {
     stop("`name` must be one non-empty character value.", call. = FALSE)
@@ -730,6 +749,7 @@ configure_dashboard <- function(
     optimal_policy = dashboard_validate_optimal_policy_config(optimal_policy, models, timeline),
     help = dashboard_validate_help_config(help),
     startup_modal = dashboard_validate_startup_modal(startup_modal),
+    header_links = dashboard_validate_header_links(header_links),
     plotters = dashboard_validate_plotters(plotters)
   )
   class(config) <- c("ezdyn_dashboard_config", "list")

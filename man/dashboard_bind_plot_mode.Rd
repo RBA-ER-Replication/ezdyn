@@ -10,7 +10,9 @@ dashboard_bind_plot_mode(
   compatibility_mode,
   plotter = NULL,
   direct_output = "plot_direct",
-  compatibility_output = "plot_image"
+  compatibility_output = "plot_image",
+  height = 400,
+  session = shiny::getDefaultReactiveDomain()
 )
 }
 \arguments{
@@ -27,10 +29,17 @@ dashboard_bind_plot_mode(
 \item{direct_output}{Output identifier for the direct plot.}
 
 \item{compatibility_output}{Output identifier for the temporary-file image.}
+
+\item{height}{Minimum plot height in pixels; match the `height` given to
+[dashboard_plot_mode_ui()].}
+
+\item{session}{Shiny session object for the current module.}
 }
 \value{
 Invisibly, `NULL`.
 }
 \description{
-Bind direct and temporary-file dashboard plot outputs.
+Both renderers draw a ggplot2 chart at the output's width in the browser
+and make it `height` pixels tall, or taller when its legend or footnotes
+need the room (see [ezdyn_ggplot_height()]).
 }

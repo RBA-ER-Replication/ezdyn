@@ -256,14 +256,15 @@ h4 {
 }
 
 .alt-path-plot {
-  height: 400px;
+  min-height: 400px;
   margin-bottom: 32px;
   overflow: hidden;
 }
 
 .alt-path-plot .shiny-image-output,
 .alt-path-plot .shiny-plot-output {
-  height: 400px !important;
+  min-height: 400px;
+  height: auto !important;
 }
 
 .alt-path-plot .shiny-image-output img {
@@ -273,6 +274,16 @@ h4 {
   object-fit: contain;
   object-position: top left;
 }
+
+/* ggplot2 charts drawn at the output's width by render_rbaplot(): show them
+   at their own aspect ratio, however tall their legend and footnotes make them. */
+.shiny-image-output img.ezdyn-fitted-plot,
+.alt-path-plot .shiny-image-output img.ezdyn-fitted-plot {
+  width: 100%;
+  height: auto;
+  max-height: none;
+}
+
 
 .alt-path-actions {
   display: flex;

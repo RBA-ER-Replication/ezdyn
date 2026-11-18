@@ -25,6 +25,17 @@ testthat::test_that("Alternative Paths uses configured slider dates and preferen
   )
 })
 
+testthat::test_that("Alternative Paths labels the slider path with the configured instrument", {
+  config <- dashboard_test_config()
+  config$instrument_display_name <- "Policy Rate"
+  names(config$baselines$Staff)[names(config$baselines$Staff) == "Cash Rate"] <- "Policy Rate"
+
+  ui_html <- htmltools::renderTags(UITab_AltPaths("alt", config))$html
+
+  testthat::expect_match(ui_html, "Policy Rate path:", fixed = TRUE)
+  testthat::expect_false(grepl("Cash Rate path:", ui_html, fixed = TRUE))
+})
+
 testthat::test_that("Alternative Paths UI exposes configured controls and public ezdyn APIs", {
   config <- dashboard_test_config()
 

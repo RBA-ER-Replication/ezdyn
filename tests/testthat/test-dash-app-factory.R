@@ -24,6 +24,31 @@ testthat::test_that("ezdyn_dashboard builds a validated app without launching", 
   testthat::expect_error(ezdyn_dashboard(list(not = "a config")), "configure_dashboard")
 })
 
+testthat::test_that("header links are shown as buttons under the title only when configured", {
+  arguments <- list(
+    models = list(Fixture = dashboard_test_model()),
+    timeline = dashboard_test_timeline(),
+    baselines = list(Staff = dashboard_test_baseline()),
+    default_baseline = "Staff"
+  )
+
+  plain_html <- htmltools::renderTags(dashboard_ui(do.call(configure_dashboard, arguments)))$html
+  testthat::expect_false(grepl("dashboard-header-links", plain_html, fixed = TRUE))
+
+  config <- do.call(configure_dashboard, c(arguments, list(
+    header_links = c("Read the guide" = "https://example.com/guide.pdf", "Source code" = "https://example.com/code")
+  )))
+  html <- htmltools::renderTags(dashboard_ui(config))$html
+  testthat::expect_match(html, "<button class=\"action-button bttn bttn-simple bttn-xs bttn-primary\" id=\"header_link_1\"", fixed = TRUE)
+  testthat::expect_match(html, "window.open(&#39;https://example.com/guide.pdf&#39;, &#39;_blank&#39;)", fixed = TRUE)
+  testthat::expect_match(html, ">Read the guide</button>", fixed = TRUE)
+  testthat::expect_match(html, "id=\"header_link_2\"[^>]*>Source code</button>")
+  # The buttons sit between the title and the tabs.
+  position <- function(text) regexpr(text, html, fixed = TRUE)
+  testthat::expect_true(position("<h2>ezdyn Dashboard</h2>") < position("dashboard-header-links"))
+  testthat::expect_true(position("dashboard-header-links") < position("id=\"active_tab\""))
+})
+
 testthat::test_that("Overview tab is included only when a custom overview is configured", {
   config <- configure_dashboard(
     models = list(Fixture = dashboard_test_model()),
@@ -74,7 +99,10 @@ testthat::test_that("cash-rate slider styles are pure HTML tags with the legacy 
   testthat::expect_match(style_text, "\\.slider-container")
   testthat::expect_match(style_text, "\\.slider-container > \\.shiny-html-output")
   testthat::expect_match(style_text, "\\.alt-path-plot")
-  testthat::expect_match(style_text, "height: 400px")
+  # The plot box is at least 400px tall and grows with taller ggplot2 charts.
+  testthat::expect_match(style_text, "min-height: 400px", fixed = TRUE)
+  testthat::expect_false(grepl("(^|[^-])height: 400px", style_text))
+  testthat::expect_match(style_text, "img.ezdyn-fitted-plot", fixed = TRUE)
   testthat::expect_match(style_text, "object-fit: contain")
   testthat::expect_match(style_text, "\\.noui-slider")
   testthat::expect_match(style_text, "\\.noUi-vertical")

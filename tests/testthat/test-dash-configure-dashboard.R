@@ -86,6 +86,26 @@ testthat::test_that("configure_dashboard accepts a custom startup modal", {
   )
 })
 
+testthat::test_that("configure_dashboard validates header links", {
+  arguments <- list(
+    models = list(Fixture = dashboard_test_model()),
+    timeline = dashboard_test_timeline(),
+    baselines = list(Staff = dashboard_test_baseline()),
+    default_baseline = "Staff"
+  )
+  links <- c("Read the guide" = "https://example.com/guide.pdf")
+
+  testthat::expect_null(do.call(configure_dashboard, arguments)$header_links)
+  config <- do.call(configure_dashboard, c(arguments, list(header_links = links)))
+  testthat::expect_identical(config$header_links, links)
+  for (invalid in list("https://example.com", c(Guide = NA_character_), c(Guide = ""), list(Guide = "https://example.com"))) {
+    testthat::expect_error(
+      do.call(configure_dashboard, c(arguments, list(header_links = invalid))),
+      "header_links"
+    )
+  }
+})
+
 testthat::test_that("configure_dashboard requires at least one enabled HSD model", {
   arguments <- list(
     models = list(Fixture = dashboard_test_model()),

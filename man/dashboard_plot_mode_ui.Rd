@@ -15,7 +15,7 @@ dashboard_plot_mode_ui(
 \arguments{
 \item{ns}{A Shiny namespace function.}
 
-\item{height}{Plot height in pixels.}
+\item{height}{Minimum plot height in pixels.}
 
 \item{compatibility_input}{Input identifier for the renderer checkbox.}
 
@@ -28,6 +28,8 @@ Shiny UI.
 }
 \description{
 Default mode writes the plot to a temporary PNG using [render_rbaplot()].
-Compatibility mode displays the plot through [shiny::renderPlot()]. A 400px
-height matches the legacy IRF image output size.
+Compatibility mode displays the plot through [shiny::renderPlot()]. Both
+are at least `height` pixels tall (400px matches the legacy IRF image
+output size), and taller when a ggplot2 chart's legend or footnotes need
+the room.
 }

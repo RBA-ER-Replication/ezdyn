@@ -194,3 +194,79 @@ testthat::test_that("plot_pretty honours an alternative-path date range", {
 	testthat::expect_equal(actual$graph$coordinates$limits$x, date_range)
 })
 
+
+
+ggplot_layout_irf_fixture <- function() {
+	models <- c("Smets Wouters (2007)", "Gali NK (Ch.3)", "Gali Unemployment (2010)", "Gertler-Karadi (2015)")
+	tibble::tibble(
+		t = rep(1:3, length(models)),
+		shock = "Monetary Policy Shock",
+		dynare_name = "pi",
+		display_name = "Inflation",
+		display_unit = "Per cent (quarterly)",
+		unit_symbol_irf = "ppt",
+		unit_symbol_baseline = "",
+		model_name = rep(models, each = 3),
+		value = seq(-0.5, 0.6, length.out = 3 * length(models))
+	)
+}
+
+# Widest visible title/legend/caption grob when drawn on a 392 x 400 px
+# renderPlot canvas (the narrowest dashboard plot column) at 72 dpi.
+ggplot_layout_overflow <- function(graph, width_px = 392, height_px = 400) {
+	width_in <- width_px / 72
+	grDevices::pdf(NULL, width = width_in, height = height_px / 72)
+	on.exit(grDevices::dev.off(), add = TRUE)
+	gt <- ggplot2::ggplotGrob(graph)
+	parts <- c("title", "subtitle", "caption", "guide-box-bottom", "guide-box-right")
+	widths <- vapply(parts, function(name) {
+		idx <- which(gt$layout$name == name)
+		if (length(idx) == 0 || inherits(gt$grobs[[idx]], "zeroGrob")) return(0)
+		grid::convertWidth(grid::grobWidth(gt$grobs[[idx]]), "in", valueOnly = TRUE)
+	}, numeric(1))
+	list(widths = widths, width_in = width_in, legend_right = widths[["guide-box-right"]] > 0)
+}
+
+testthat::test_that("ggplot2 IRF charts fit their title, legend and caption in a narrow dashboard column", {
+	out <- plot_pretty(
+		ggplot_layout_irf_fixture(),
+		title = "Response of Inflation to Monetary Policy Shock",
+		plotter = "ggplot"
+	)
+	graph <- out$graph + dashboard_ggplot_caption(c(
+		"Monetary Policy Shock is calibrated to a 1 ppt impact on Nominal Interest Rate in the first quarter.",
+		paste(rep("Smets Wouters (2007) responses are a first-order approximation around the steady state.", 3), collapse = " ")
+	))
+
+	layout <- ggplot_layout_overflow(graph)
+	testthat::expect_false(layout$legend_right)
+	testthat::expect_true(all(layout$widths <= layout$width_in))
+	# One shock across several models: the shock becomes the legend title and
+	# each key shows only its model; the data keeps its full line labels.
+	colour_scale <- graph$scales$get_scales("colour")
+	testthat::expect_identical(colour_scale$breaks, unique(out$graph$data$line_label))
+	testthat::expect_identical(colour_scale$labels, unique(ggplot_layout_irf_fixture()$model_name))
+	testthat::expect_true("Monetary Policy Shock (Smets Wouters (2007))" %in% names(out$graph_data))
+})
+
+testthat::test_that("ggplot2 alternative-path legends wrap long multi-model labels and stay merged", {
+	pretty <- plot_pretty_irf_fixture()
+	out <- plot_pretty(pretty, display_names = "Cash Rate", plotter = "ggplot")
+	layout <- ggplot_layout_overflow(out$graph)
+	testthat::expect_false(layout$legend_right)
+	testthat::expect_true(all(layout$widths <= layout$width_in))
+	grDevices::pdf(NULL, width = 392 / 72, height = 400 / 72)
+	on.exit(grDevices::dev.off(), add = TRUE)
+	gt <- ggplot2::ggplotGrob(out$graph)
+	guide_box <- gt$grobs[[which(gt$layout$name == "guide-box-bottom")]]
+	# Colour and linetype guides share labels, so they still merge into one legend.
+	testthat::expect_equal(sum(grepl("^guides", guide_box$layout$name)), 1)
+})
+
+testthat::test_that("building a ggplot2 chart does not open a graphics device", {
+	# Compare with the devices already open rather than closing them. In a
+	# fresh session (none open) this catches a newly opened default device.
+	devices_before <- grDevices::dev.list()
+	plot_pretty(ggplot_layout_irf_fixture(), plotter = "ggplot")
+	testthat::expect_identical(grDevices::dev.list(), devices_before)
+})

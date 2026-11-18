@@ -23,9 +23,12 @@ configure_dashboard(
   hsd = list(),
   alt_paths = list(),
   dictionary = list(),
+  response_notes = NULL,
   optimal_policy = NULL,
   help = list(),
-  startup_modal = NULL
+  startup_modal = NULL,
+  header_links = NULL,
+  plotters = "ggplot"
 )
 }
 \arguments{
@@ -34,7 +37,11 @@ configure_dashboard(
 \item{models}{Named list of full Dynare or custom-MOO pairs.}
 
 \item{timeline}{Named list containing quarterly Date values `data_start`,
-`data_end`, `forecast_start`, and `forecast_end`.}
+`data_end`, `forecast_start`, and `forecast_end`. Optionally also
+`hsd_data_start`, the calendar quarter that `t == 1` represents in the
+Historical Shock Decomposition tab (passed to `ez_hd()`'s `data_start`);
+defaults to `data_start` when omitted. Set it explicitly when a model's
+true smoothed-estimation-sample start differs from `data_start`.}
 
 \item{baselines}{Named list of canonical `ezdyn_baseline` objects.}
 
@@ -79,6 +86,13 @@ is the selector's initial selection (defaults to every eligible model).}
 model selector (defaults to every configured model); `dictionary$defaults$models`
 is the selector's initial selection (defaults to every eligible model).}
 
+\item{response_notes}{Optional data frame of reviewed footnote caveats shown
+in the IRF Library and Alternative Policy Paths tabs, with columns
+`model_name` (a configured model label), `note` (the footnote text), and
+optionally `display_name` (a response variable's display name; `NA` or
+omitted applies the note whenever that model appears at all). `NULL`
+(the default) shows no response-note footnotes.}
+
 \item{optimal_policy}{Optional policy-module configuration. When enabled,
 supplies model roles, a separate policy horizon, explicit instrument codes,
 baseline preparation/extension functions, timeless-policy vintages, and
@@ -99,6 +113,23 @@ fallback modal is shown when unset.}
 
 \item{startup_modal}{Optional UI returned by [shiny::modalDialog()] to show
 once when a session starts.}
+
+\item{header_links}{Optional named character vector of links shown as
+buttons under the dashboard title, e.g.
+`c("Read the whitepaper" = "https://...")`. Names are the
+button labels, and each button opens its link in a new browser tab. `NULL` (the
+default) shows no links.}
+
+\item{plotters}{Character vector naming the plotting backends this
+dashboard offers, from `c("ggrba", "ggplot")`. Explicit and static - not
+detected from installed packages - so a deployment controls exactly
+which backends are offered regardless of what happens to be installed
+on the server. The "Plot style" control is shown only when more than one
+backend is configured; `"ggrba"` is preselected when both are available.
+Defaults to `"ggplot"` only, so the dashboard - and `ezdyn` generally -
+keeps working without the optional, internal-only `ggrba` package in a
+more public context. Supply `c("ggrba", "ggplot")` for a deployment that
+should also offer RBA-styled charts.}
 }
 \value{
 An object of class `ezdyn_dashboard_config`.

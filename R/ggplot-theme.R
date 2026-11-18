@@ -43,13 +43,12 @@ check_unit <- function(x) {
 #'   panel width because for multipanels sources/footnotes sit outside the plot.
 ezdyn_plot_size_rba <- function(plot.width = grid::unit(190, "mm"), plot.height = grid::unit(140, "mm"),
                           plot = TRUE, panel = FALSE, caption.width = plot.width) {
-  # Check both inputs are units
+  # Check both inputs are units. They are not converted: the sizes are only
+  # recorded as (inert) `max.width` fields below, and grid::convertUnit()
+  # opens a graphics device (writing Rplots.pdf, or resizing the device that
+  # a later ggsave() call would otherwise take its size from).
   plot.width <- check_unit(plot.width)
   plot.height <- check_unit(plot.height)
-
-  # Convert both to consistent unit
-  plot.width <- grid::convertUnit(plot.width, "mm")
-  plot.height <- grid::convertUnit(plot.height, "mm")
 
   # Update all necessary theme elements. `plot.width`/`plot.height` are not
   # stored on the theme itself (that would require registering custom

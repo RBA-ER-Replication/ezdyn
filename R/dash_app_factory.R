@@ -15,12 +15,39 @@ dashboard_validate_config <- function(config) {
   config
 }
 
+# Show configured header links as buttons under the dashboard title. Each
+# button opens its link in a new browser tab.
+dashboard_header_links <- function(header_links) {
+  if (length(header_links) == 0) {
+    return(NULL)
+  }
+  shiny::tags$div(
+    class = "dashboard-header-links",
+    style = "display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px;",
+    lapply(seq_along(header_links), function(i) {
+      shinyWidgets::actionBttn(
+        inputId = paste0("header_link_", i),
+        label = names(header_links)[[i]],
+        style = "simple",
+        color = "primary",
+        size = "xs",
+        no_outline = FALSE,
+        onclick = sprintf(
+          "var w = window.open(%s, '_blank'); if (w) w.opener = null;",
+          encodeString(header_links[[i]], quote = "'")
+        )
+      )
+    })
+  )
+}
+
 # Build the configuration-driven dashboard UI without reading model data.
 dashboard_ui <- function(config) {
   shiny::fluidPage(
     cash_rate_slider_styles(),
     cash_rate_slider_dependency(),
     shiny::titlePanel(config$name),
+    dashboard_header_links(config$header_links),
     shiny::tabsetPanel(
       id = "active_tab",
       if (isTRUE(config$overview$enabled)) {

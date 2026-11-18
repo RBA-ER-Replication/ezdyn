@@ -229,6 +229,13 @@ testthat::test_that("Optimal Policy UI uses configured description and a button-
   testthat::expect_match(html, "policy-help_commitment_start")
   testthat::expect_match(html, "policy-baseline_name")
   testthat::expect_match(html, "policy-active_baseline")
+  # The baseline selector has its own section between the model and strategy details.
+  position <- function(text) regexpr(text, html, fixed = TRUE)
+  testthat::expect_true(position("Model details") < position("Baseline details"))
+  testthat::expect_true(position("Baseline details") < position("policy-baseline_name"))
+  # The active-baseline line sits at the end of the Advanced options.
+  testthat::expect_true(position("policy-show_table") < position("policy-active_baseline"))
+  testthat::expect_true(position("policy-baseline_name") < position("Strategy details"))
   testthat::expect_match(html, "policy-open_upload")
 
   config$optimal_policy$description_ui <- function() shiny::p("Fixture policy description")
