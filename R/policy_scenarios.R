@@ -1,6 +1,6 @@
 # Optimal policy scenarios ---------------------------------------------------
 
-#' Run one optimal-policy scenario for one model.
+#' Run one optimal-policy scenario for one model
 #'
 #' `get_policy_scenario()` implements the sufficient-statistics approach to
 #' optimal policy: given a quadratic loss function, a baseline forecast, and
@@ -31,7 +31,10 @@
 #' `T_loss` is the number of forecast quarters over which the loss is
 #' counted; `T_instrument` is the number of quarters of policy shocks chosen
 #' (i.e. over which policy is optimised). Both must lie between 1 and the
-#' number of quarters from `forecast_start` to `forecast_end`.
+#' number of quarters from `forecast_start` to `forecast_end`. Under
+#' discretion, `T_loss` must also be at least `T_instrument`: policy is re-set
+#' in each instrument quarter to minimise the loss from then on, so every
+#' instrument quarter must fall within the loss horizon.
 #'
 #' `commit` selects the strategy: `"disc"` for discretion, or one of two
 #' forms of commitment - `"commit"`, in which commitment starts today, and
@@ -48,6 +51,15 @@
 #' error is raised if the model's impulse responses or anticipated shocks
 #' do not cover the required horizon (including any commitment history).
 #'
+#' See [get_policy_scenarios()] to run a list of strategies across a list of
+#' models at once (as the dashboard does).
+#'
+#' `baseline` has a quarterly `date` column and includes the output, loss,
+#' constraint, and instrument variables named in `policy_strategy`, each
+#' column keyed by either `model`'s own dynare code or (as in a canonical
+#' baseline returned by [import_baseline()]) its display name. The returned
+#' paths are rescaled and labelled with model metadata.
+#'
 #' @section Commitment start and forecast vintages:
 #' Under `"timeless"`, the problem is re-solved at each historical forecast
 #' vintage from `preloss_start` to today, so it needs those forecasts, via
@@ -62,13 +74,16 @@
 #' ```
 #' `loss_variable_vintages` is a long data frame with columns:
 #' * `vintage`: the first forecast quarter of each historical forecast, one
-#'   per quarter from `preloss_start`;
+#'   per quarter from `preloss_start` to the quarter before `forecast_start`;
 #' * `date`: the quarter being forecast, from the vintage quarter to the end
 #'   of today's loss horizon;
-#' * one column per loss variable, named by the model's own variable code
-#'   (e.g. `pi_obs_gap_loss`) and already expressed as a deviation from
-#'   target; and
-#' * the policy instrument, named by its model code (e.g. `r_obs`).
+#' * one column per loss variable, named as in `loss_variables` - by display
+#'   name (e.g. `Inflation_gap_loss`) or by the model's own variable code
+#'   (e.g. `pi_obs_gap_loss`) - and already expressed as a deviation from
+#'   target. Display names let one table serve every model; and
+#' * only if a constraint is marked `historical = TRUE` (see below), the
+#'   policy instrument's level, named like `instrument_variable` (e.g.
+#'   `Cash Rate` or `r_obs`).
 #'
 #' Each vintage must cover every quarter from its own first forecast quarter
 #' to the end of today's loss horizon, and today's forecast is taken from
@@ -82,17 +97,9 @@
 #' `list(variable = "Cash Rate", direction = "lower", value = 0.1, period = 1:20)`.
 #' Under `"timeless"`, a bound on the policy instrument can also be marked
 #' `historical = TRUE`, so it is assumed to have been in place in every
-#' historical vintage as well, generating `make-up' policy today via the
-#' carried-forward Lagrange multipliers.
-#'
-#' See [get_policy_scenarios()] to run a list of strategies across a list of
-#' models at once (as the dashboard does).
-#'
-#' `baseline` has a quarterly `date` column and includes the output, loss,
-#' constraint, and instrument variables named in `policy_strategy`, each
-#' column keyed by either `model`'s own dynare code or (as in a canonical
-#' baseline returned by [import_baseline()]) its display name. The returned
-#' paths are rescaled and labelled with model metadata.
+#' historical vintage as well, generating "make-up" policy today via the
+#' carried-forward Lagrange multipliers. This needs the instrument's level in
+#' `loss_variable_vintages`.
 #'
 #' @param policy_strategy Named list with `output_name`, `output_variables`,
 #'   `loss_variables`, `loss_weights`, `discount_factor`, `T_loss`,
@@ -111,11 +118,14 @@
 #' @param lambda Cognitive-discounting parameter.
 #' @param forecast_start First forecast quarter.
 #' @param forecast_end Final forecast quarter.
-#' @param loss_variable_vintages Optional long history for timeless commitment.
+#' @param loss_variable_vintages Historical forecasts for timeless commitment,
+#'   as described in "Commitment start and forecast vintages". Only used when
+#'   `commit = "timeless"`.
 #' @param preloss_start First historical commitment quarter for timeless policy.
 #' @param policy_irfs Optional cached array returned by [build_policy_irfs()].
 #'
 #' @return A long data frame containing baseline and alternative paths.
+#' @md
 #' @export
 get_policy_scenario <- function(
     policy_strategy,

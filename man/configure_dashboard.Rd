@@ -322,8 +322,13 @@ The tab finds the policy rate path that minimises a loss function: the
 weighted sum of squared gaps between chosen variables and their targets.
 The user picks the loss variables, their weights and targets, the
 strategy (commitment or discretion), the horizons, and any bounds on
-variables (including an effective lower bound on the rate). The tab is
-only shown if you supply \code{optimal_policy}, and it then needs:
+variables (including an effective lower bound on the rate). It runs
+\code{\link[=get_policy_scenario]{get_policy_scenario()}} for each selected model and strategy, which
+explains the method: the tab's "loss evaluation horizon" and "optimisation
+horizon" are its \code{T_loss} and \code{T_instrument}, and the tab builds the
+\verb{<loss variable>_gap_loss} columns itself, from the baseline and the
+targets the user sets. The tab is only shown if you supply
+\code{optimal_policy}, and it then needs:
 \itemize{
 \item \code{forecast_end} (required): the last quarter of the policy horizon, at or
 after \code{timeline$forecast_start}. Often the end of the baseline
@@ -364,8 +369,12 @@ policy was committed to in some past quarter and re-solved each quarter
 since, using the baseline of the time. Without them, Commitment is
 ordinary commitment from the forecast start. It's a data frame with
 \code{vintage} and \code{date} columns and one \verb{<loss variable>_gap_loss} column per
-loss variable (e.g. \code{Inflation_gap_loss}): the gap from the target as it
-stood at the time. See \code{\link[=get_policy_scenario]{get_policy_scenario()}} for the full format.
+loss variable (e.g. \code{Inflation_gap_loss}): unlike the baseline, these
+must already be gaps, from the target as it stood at the time. The
+"ELB" option also needs the policy rate's level, in a column named like
+\code{instrument_variable}: under timeless commitment the ELB is assumed to
+have applied in every past vintage too, which can call for "make-up"
+policy today. See \code{\link[=get_policy_scenario]{get_policy_scenario()}} for the full format.
 \item \code{preloss_start}: the earliest commitment start the user can choose,
 usually the first vintage (default \code{timeline$forecast_start}).
 }
