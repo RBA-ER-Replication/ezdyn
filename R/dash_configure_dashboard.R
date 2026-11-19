@@ -339,6 +339,14 @@ dashboard_validate_alt_paths_config <- function(alt_paths, models) {
       !all(defaults$models %in% alt_paths$models)) {
     stop("`alt_paths$defaults$models` must contain eligible Alt Paths model labels.", call. = FALSE)
   }
+  # Initially plotted response variables (`NULL` uses `irf$defaults$display_names`)
+  # and the initial cognitive-discounting (anticipation) parameter.
+  defaults$lambda <- dashboard_or_default(defaults$lambda, 0.8)
+  if ((!is.null(defaults$display_names) && (!is.character(defaults$display_names) || anyNA(defaults$display_names))) ||
+      !is.numeric(defaults$lambda) || length(defaults$lambda) != 1 || is.na(defaults$lambda) ||
+      defaults$lambda < 0 || defaults$lambda > 1) {
+    stop("`alt_paths$defaults` contains invalid display-name or lambda settings.", call. = FALSE)
+  }
 
   list(models = alt_paths$models, defaults = defaults)
 }
@@ -386,6 +394,21 @@ dashboard_validate_dictionary_config <- function(dictionary, models) {
 dashboard_is_named_character <- function(value) {
   is.character(value) && length(value) > 0 && !is.null(names(value)) &&
     !anyNA(names(value)) && all(names(value) != "")
+}
+
+# Label a choice vector: each choice without a name is labelled with its own
+# value, so `c("Inflation", "Output")` and `c("Inflation" = "Inflation",
+# "Output" = "Output")` are equivalent. Anything but a non-empty character
+# vector is returned unchanged, for the caller to reject.
+dashboard_label_choices <- function(choices) {
+  if (!is.character(choices) || length(choices) == 0 || anyNA(choices) || any(choices == "")) {
+    return(choices)
+  }
+  labels <- names(choices)
+  if (is.null(labels)) labels <- choices
+  unlabelled <- is.na(labels) | labels == ""
+  labels[unlabelled] <- choices[unlabelled]
+  stats::setNames(choices, labels)
 }
 
 # Validate an optional named list of help-modal hook functions against a set
@@ -476,8 +499,14 @@ dashboard_validate_optimal_policy_config <- function(optimal_policy, models, tim
   prepare_baseline <- dashboard_or_default(optimal_policy$prepare_baseline, function(baseline, model, policy_config) baseline)
   extend_baseline <- dashboard_or_default(optimal_policy$extend_baseline, function(baseline, policy_config) baseline)
   loss_variable_vintages <- dashboard_or_default(optimal_policy$loss_variable_vintages, NULL)
-  loss_variable_choices <- dashboard_or_default(optimal_policy$loss_variable_choices, NULL)
-  constraint_variable_choices <- dashboard_or_default(optimal_policy$constraint_variable_choices, NULL)
+  loss_variable_choices <- dashboard_label_choices(dashboard_or_default(optimal_policy$loss_variable_choices, NULL))
+  constraint_variable_choices <- dashboard_label_choices(dashboard_or_default(optimal_policy$constraint_variable_choices, NULL))
+  if (is.data.frame(loss_variable_vintages) && !all(c("vintage", "date") %in% names(loss_variable_vintages))) {
+    stop(
+      "`optimal_policy$loss_variable_vintages` needs `vintage` and `date` columns, plus one `<loss variable>_gap_loss` column per loss variable.",
+      call. = FALSE
+    )
+  }
   default_response_variables <- dashboard_or_default(optimal_policy$default_response_variables, character(0))
   default_loss_variables <- dashboard_or_default(optimal_policy$default_loss_variables, character(0))
   elb_variable <- dashboard_or_default(optimal_policy$elb_variable, instrument_variable)
@@ -617,6 +646,10 @@ dashboard_validate_plotters <- function(plotters) {
 #'   `alt_paths$models` is the eligible model allow-list offered by the tab's
 #'   model selector (defaults to every configured model); `alt_paths$defaults$models`
 #'   is the selector's initial selection (defaults to every eligible model).
+#'   `alt_paths$defaults$display_names` sets the initially plotted response
+#'   variables (defaults to `irf$defaults$display_names`), and
+#'   `alt_paths$defaults$lambda` the initial cognitive-discounting
+#'   (anticipation) parameter (defaults to 0.8).
 #' @param dictionary Variable Dictionary model-selection configuration.
 #'   `dictionary$models` is the eligible model allow-list offered by the tab's
 #'   model selector (defaults to every configured model); `dictionary$defaults$models`
@@ -629,8 +662,24 @@ dashboard_validate_plotters <- function(plotters) {
 #'   (the default) shows no response-note footnotes.
 #' @param optimal_policy Optional policy-module configuration. When enabled,
 #'   supplies model roles, a separate policy horizon, explicit instrument codes,
-#'   baseline preparation/extension functions, timeless-policy vintages, and
-#'   optional composition-supplied UI hooks: `help` (named list of modal-
+#'   baseline preparation/extension functions, the variables the tab offers,
+#'   timeless-policy vintages, and optional composition-supplied UI hooks.
+#'   `loss_variable_choices` and `constraint_variable_choices` are character
+#'   vectors of the variables offered as loss-function variables and as
+#'   constraint (bound) variables, e.g. `c("Inflation", "Output")`. Use
+#'   display names so one list works across models; dynare codes also work.
+#'   The tab labels each choice with its value. Optionally, name an element to
+#'   give it a different label, e.g. `c("Output gap" = "Output", "Inflation")`.
+#'   `loss_variable_vintages` (optional) makes the tab's Commitment strategy
+#'   timeless commitment, re-solved from a past commitment start; without it,
+#'   Commitment is ordinary commitment from the forecast start and the tab has
+#'   no commitment-start control. It is a data frame of past baselines: `vintage` and
+#'   `date` columns plus one `<loss variable>_gap_loss` column per loss
+#'   variable, named by the variable's value in `loss_variable_choices`
+#'   (e.g. `Inflation_gap_loss`), holding its gap from the target as it stood
+#'   at the time, in baseline units. The ELB option also needs the
+#'   instrument's level, in a column named like `instrument_variable`. See
+#'   [get_policy_scenario()] for the full format. UI hooks: `help` (named list of modal-
 #'   returning functions keyed by `cd`, `strategy`, `loss_variables`,
 #'   `loss_horizon`, `instrument_horizon`, `constraints`, `commitment_start`;
 #'   missing keys show a generic fallback modal), `description_ui` (function

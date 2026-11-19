@@ -1,8 +1,9 @@
 # Build variable/shock/parameter metadata workbooks for all 8 models in this
 # dashboard: Smets-Wouters (2007) plus 7 curated Pfeifer DSGE_mod NK models
-# (see build_new_models.m / README.md for how the underlying Dynare JSON
-# model objects are built - this script reads inputs/SW_2007_45.json for SW's
-# parameter values, so build_new_models.m must be run first).
+# (see build_new_models.m, Smets_Wouters_2007_anticipated/build_sw_anticipated.m
+# and README.md for how the underlying Dynare JSON model objects are built -
+# this script reads inputs/SW_2007_45.json for SW's parameter values, so
+# build_sw_anticipated.m must be run first).
 #
 # Display names are shared ACROSS models wherever the underlying concept and
 # units genuinely match (e.g. "Nominal Interest Rate", "Inflation", "Hours
@@ -21,15 +22,19 @@
 # (ezdyn's `validate_display_names()` only errors when the SAME display name
 # is used with DIFFERENT units across models).
 #
-# Every model provides the same six common variables: "Inflation",
+# Every model provides the same nine common variables: "Inflation",
 # "Inflation (year-ended)", "Nominal Interest Rate", "Nominal Interest Rate
-# (quarterly)", "Hours Worked" and "Output". Where a model's own variable has
-# a different name (e.g. "Price Inflation"), a derived alias row
-# (`derived_from`, no transform) adds the common name alongside it.
-# "Inflation (year-ended)" is the four-quarter sum of each model's quarterly
-# inflation. "Nominal Interest Rate" is each model's quarterly nominal rate
-# annualised (x 4), and "Nominal Interest Rate (quarterly)" is the quarterly
-# rate itself. See README.md ("Common variables") for how each model gets
+# (quarterly)", "Nominal Interest Rate Changes", "Hours Worked", "Output",
+# "Output Growth" and "Output Growth (year-ended)". Where a model's own variable has a different name (e.g.
+# "Price Inflation"), a derived alias row (`derived_from`, no transform) adds
+# the common name alongside it. "Inflation (year-ended)" is the four-quarter
+# sum of each model's quarterly inflation. "Nominal Interest Rate" is each
+# model's quarterly nominal rate annualised (x 4), "Nominal Interest Rate
+# (quarterly)" is the quarterly rate itself, and "Nominal Interest Rate
+# Changes" is the quarterly change in the annualised rate. "Output Growth" is
+# the quarterly change in "Output", for models without their own (SW and
+# Ireland have one), and "Output Growth (year-ended)" is the sum of its last
+# four quarters. See README.md ("Common variables") for how each model gets
 # each variable.
 #
 # The `alt_paths`, `irf` and `hsd` columns choose which dashboard tabs offer
@@ -52,7 +57,7 @@ unit_symbol_cols <- function(units) {
   irf <- case_when(
     is_rate ~ "ppt",
     units == "Per cent deviation from steady state" ~ "% dev",
-    units == "Percentage points deviation from steady state" ~ "ppt"
+    grepl("^Percentage points", units) ~ "ppt"
   )
   if (anyNA(irf)) {
     stop("No unit symbols for units: ", paste(unique(units[is.na(irf)]), collapse = ", "))
@@ -102,17 +107,54 @@ annualise <- function(df, rates, own_scale = NULL) {
 
 # Show the model's quarterly nominal rate `rate` annualised, as "Nominal
 # Interest Rate". A derived "Nominal Interest Rate (quarterly)" row scales it
-# back by 1/4 (applied after the rate's own scale factor).
+# back by 1/4 (applied after the rate's own scale factor). A derived "Nominal
+# Interest Rate Changes" row is the quarterly change in the annualised rate
+# (the rate's own x 4 applies first, so it needs no scaling of its own), e.g.
+# for an interest-rate-smoothing term in Optimal Policy's loss function. It is
+# kept off the Alternative Paths picker.
 annualise_rate <- function(df, rate, own_scale = NULL) {
   df |>
     annualise(rate, own_scale) |>
     insert_after(rate, tibble(
-      dynare_name = paste0(rate, "_q"),
-      display_name = "Nominal Interest Rate (quarterly)",
-      units = "Per cent (quarterly)",
-      scale_formula = "0.25",
-      derived_from = rate
+      dynare_name = paste0(rate, c("_q", "_change")),
+      display_name = c("Nominal Interest Rate (quarterly)", "Nominal Interest Rate Changes"),
+      units = c("Per cent (quarterly)", "Percentage points (annualized)"),
+      scale_formula = c("0.25", NA),
+      derived_from = rate,
+      derived_transform = c(NA, "diff"),
+      alt_paths = c(NA, FALSE)
     ))
+}
+
+# "Output Growth" and "Output Growth (year-ended)": the quarterly and
+# four-quarter changes in the model's output `output` (the `diff` and
+# `year_ended_change` transforms), for models without an output growth
+# variable of their own. Output growth is the deviation of output growth from
+# trend, as SW's `dy` is (`dy = y - y(-1)` plus a constant trend), so the two
+# share a display name, and the four-quarter change is the sum of its last
+# four quarters. `output` must be a model variable, not an alias row.
+output_growth_row <- function(output) {
+  tibble(
+    dynare_name = paste0(output, c("_growth", "_growth_ye")),
+    display_name = c("Output Growth", "Output Growth (year-ended)"),
+    units = c("Per cent (quarterly)", "Per cent (year-ended)"),
+    derived_from = output,
+    derived_transform = c("diff", "year_ended_change")
+  )
+}
+
+# "Output Growth (year-ended)": the sum of the last four quarters of the
+# model's own quarterly output growth variable `growth` (SW and Ireland), like
+# "Inflation (year-ended)". `growth` must be a model variable, not an alias
+# row.
+year_ended_output_growth_row <- function(growth) {
+  tibble(
+    dynare_name = paste0(growth, "_ye"),
+    display_name = "Output Growth (year-ended)",
+    units = "Per cent (year-ended)",
+    derived_from = growth,
+    derived_transform = "year_ended_sum"
+  )
 }
 
 # A common display name for an existing model variable `source`.
@@ -135,11 +177,24 @@ year_ended_inflation_row <- function(inflation) {
   )
 }
 
+# Add an "All Shocks" shock grouping: each shock on its own, labelled by its
+# description, with any measurement errors (`is_measurement_error`) together
+# as "Measurement errors".
+all_shocks_grouping <- function(shocks) {
+  measurement_error <- if ("is_measurement_error" %in% names(shocks)) {
+    coalesce(as.logical(shocks$is_measurement_error), FALSE)
+  } else {
+    rep(FALSE, nrow(shocks))
+  }
+  mutate(shocks, `All Shocks` = if_else(measurement_error, "Measurement errors", description))
+}
+
 # 0. Smets_Wouters_2007_45 ----------------------------------------------------
 # Descriptions are taken directly from the `long_name` annotations in
-# DSGE_mod/Smets_Wouters_2007/Smets_Wouters_2007_45.mod. Parameter values are
-# read back from the model JSON produced by build_new_models.m, so they
-# always match the actual calibration used by the exported MOO object (not
+# Smets_Wouters_2007_anticipated/Smets_Wouters_2007_45_anticipated.mod (the
+# same as DSGE_mod's Smets_Wouters_2007_45.mod). Parameter values are read back
+# from the model JSON produced by build_sw_anticipated.m, so they always match
+# the actual calibration used by the exported MOO object (not
 # hand-transcribed).
 sw_model_json <- fromJSON(readLines("inputs/SW_2007_45.json"), simplifyVector = TRUE)
 sw_param_names <- unlist(sw_model_json$M_$param_names)
@@ -174,13 +229,24 @@ sw_variables <- tribble(
 ) |>
   annualise_rate("robs") |>
   annualise("r") |>
+  insert_after("dy", year_ended_output_growth_row("dy")) |>
   insert_after("pinfobs", year_ended_inflation_row("pinfobs")) |>
   common_cols()
 
-# `Demand/Supply/Monetary` is a shock-grouping column (any column besides
-# `shock`/`description`/`is_measurement_error` is picked up automatically by
-# `ez_hd.available_shock_groupings()` and offered as a "Shock grouping:"
-# choice in the dashboard's Historical Shock Decomposition tab).
+# `Demand/Supply/Monetary` and `All Shocks` are shock-grouping columns (any
+# column besides `shock`/`description`/`is_measurement_error` is picked up
+# automatically by `ez_hd.available_shock_groupings()` and offered as a
+# "Shock grouping:" choice in the dashboard's Historical Shock Decomposition
+# tab). `All Shocks` shows each shock on its own, by its description, except
+# that measurement errors (`is_measurement_error`) would share one
+# "Measurement errors" group. SW has none: it is estimated with seven
+# structural shocks for its seven observables.
+#
+# The anticipated monetary policy shocks (`em_1`, `em_2`, ...) deliberately
+# have no rows here: ezdyn finds them by their codes for the policy
+# experiments, while leaving them out keeps them off the Impulse Response
+# Library's shock list. They have zero variance, so their smoothed values,
+# and their historical shock decomposition contributions, are zero.
 sw_shocks <- tribble(
   ~shock,   ~description,                            ~`Demand/Supply/Monetary`,
   "ea",     "Productivity shock",                     "Supply",
@@ -190,7 +256,8 @@ sw_shocks <- tribble(
   "em",     "Monetary policy shock",                   "Monetary",
   "epinf",  "Price markup shock",                      "Supply",
   "ew",     "Wage markup shock",                       "Supply"
-)
+) |>
+  all_shocks_grouping()
 
 # Parameters sheet (documentation only - ezdyn ignores this sheet)
 sw_parameter_descriptions <- tribble(
@@ -268,6 +335,7 @@ gali2015ch3_variables <- tribble(
 ) |>
   annualise_rate("i") |>
   annualise(c("r_real", "r_nat")) |>
+  insert_after("y", output_growth_row("y")) |>
   insert_after("pi", year_ended_inflation_row("pi")) |>
   common_cols()
 
@@ -300,6 +368,7 @@ gali2015ch6_variables <- tribble(
 ) |>
   annualise_rate("i") |>
   annualise(c("r_real", "r_nat")) |>
+  insert_after("y", output_growth_row("y")) |>
   # Price inflation is the model's inflation rate (wage inflation is separate).
   insert_after("pi_p", alias_row("inflation", "Inflation", "Per cent (quarterly)", "pi_p")) |>
   insert_after("inflation", year_ended_inflation_row("pi_p")) |>
@@ -334,6 +403,7 @@ gali2015ch8_variables <- tribble(
 ) |>
   annualise_rate("i") |>
   annualise(c("r_real", "r_nat")) |>
+  insert_after("y", output_growth_row("y")) |>
   insert_after("pi", year_ended_inflation_row("pi")) |>
   # `n` is the same hours input as Ch.3's "Hours Worked" (both use the
   # production function y = a + (1 - alpha) * n).
@@ -361,7 +431,10 @@ gali2010_variables <- tribble(
   "y_gap",        "Output",                         "Per cent deviation from steady state",
   "nhat",         "Employment",                     "Per cent deviation from steady state",
   "fhat",         "Labor Force",                    "Per cent deviation from steady state",
-  "urhat",        "Unemployment Rate",              "Percentage points deviation from steady state",
+  # A rate like the interest rate: the model's deviation from steady state
+  # moves it in percentage points, around a baseline in per cent (the US
+  # unemployment rate in the dashboard).
+  "urhat",        "Unemployment Rate",              "Per cent (of the labour force)",
   "hatw_real",    "Real Wage",                      "Per cent deviation from steady state",
   "mu_hat",       "Price Markup",                   "Per cent deviation from steady state",
   "a",            "Technology Shock Process",       "Per cent deviation from steady state",
@@ -369,6 +442,7 @@ gali2010_variables <- tribble(
 ) |>
   annualise_rate("ihat") |>
   annualise("rhat") |>
+  insert_after("y_gap", output_growth_row("y_gap")) |>
   insert_after("pi_p", alias_row("inflation", "Inflation", "Per cent (quarterly)", "pi_p")) |>
   insert_after("inflation", year_ended_inflation_row("pi_p")) |>
   # The model has no hours-per-worker margin (employment is the only labour
@@ -403,6 +477,7 @@ ireland2004_variables <- tribble(
 ) |>
   annualise_rate("rhat") |>
   insert_after("pihat", year_ended_inflation_row("pihat")) |>
+  insert_after("ghat", year_ended_output_growth_row("ghat")) |>
   insert_after("yhat", alias_row("hours", "Hours Worked", "Per cent deviation from steady state", "yhat")) |>
   common_cols() |>
   mutate(irf = dynare_name != "yhat")
@@ -439,6 +514,7 @@ ascari_variables <- tribble(
   # before annualising.
   annualise_rate("i", own_scale = "i_bar") |>
   annualise("real_interest") |>
+  insert_after("y", output_growth_row("y")) |>
   insert_after("pi", year_ended_inflation_row("pi")) |>
   common_cols()
 
@@ -471,6 +547,7 @@ bp2018mp_variables <- tribble(
 ) |>
   annualise_rate("i") |>
   annualise(c("r_real", "r_nat")) |>
+  insert_after("y", output_growth_row("y")) |>
   insert_after("pi_p", alias_row("inflation", "Inflation", "Per cent (quarterly)", "pi_p")) |>
   insert_after("inflation", year_ended_inflation_row("pi_p")) |>
   common_cols()

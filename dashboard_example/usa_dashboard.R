@@ -7,9 +7,11 @@
 # further down).
 #
 # Multi-model ezdyn dashboard combining the Smets-Wouters (2007) replication
-# model with 7 curated small-scale New Keynesian models from the Pfeifer
-# DSGE_mod collection (https://github.com/JohannesPfeifer/DSGE_mod, cloned
-# into DSGE_mod/ - see README.md for setup), each of which has an active
+# model (with anticipated monetary policy shocks, built from
+# Smets_Wouters_2007_anticipated/) with 7 curated small-scale New Keynesian
+# models from the Pfeifer DSGE_mod collection
+# (https://github.com/JohannesPfeifer/DSGE_mod, cloned into DSGE_mod/ - see
+# README.md for setup), each of which has an active
 # monetary policy shock suitable for impulse-response policy exercises. It
 # has no custom help content, HSD preamble, or baseline prepare/extend hooks -
 # everything else stays at ezdyn's generic defaults.
@@ -52,14 +54,19 @@ library(tibble)
 
 sw_dynare_path <- "inputs/SW_2007_45.json"
 sw_metadata_path <- "inputs/variable_metadata.xlsx"
+# The three workbooks build_us_baseline.R writes: the data (not tracked in
+# git), the timeline and loss-function targets (tracked in git), and,
+# optionally, real-time vintages for Optimal Policy's timeless commitment.
 us_baseline_path <- "inputs/us_baseline.xlsx"
+us_settings_path <- "inputs/us_settings.xlsx"
+us_vintages_path <- "inputs/us_vintages.xlsx"
 
 # The 7 additional curated Pfeifer NK models (see build_new_models.m /
 # build_model_metadata.R). Each entry names the model in the dashboard,
 # gives it a distinct plot colour, and points at its JSON/metadata inputs.
 dsgemoddash_extra_models <- tribble(
   ~model_name,                  ~colour,          ~dynare_path,                            ~metadata_path,
-  "Gali NK (Ch.3)",             "steelblue",      "inputs/Gali2015Ch3.json",               "inputs/Gali2015Ch3_metadata.xlsx",
+  "Gali NK (Ch.3)",             "red",      "inputs/Gali2015Ch3.json",               "inputs/Gali2015Ch3_metadata.xlsx",
   "Gali NK+Wage (Ch.6)",        "darkorange",     "inputs/Gali2015Ch6.json",               "inputs/Gali2015Ch6_metadata.xlsx",
   "Gali SOE (Ch.8)",            "purple",         "inputs/Gali2015Ch8.json",               "inputs/Gali2015Ch8_metadata.xlsx",
   "Gali Unemployment (2010)",   "firebrick",      "inputs/Gali2010.json",                  "inputs/Gali2010_metadata.xlsx",
@@ -90,15 +97,21 @@ feedback_url <- paste0(ezdyn_github_url, "/issues/new")
 
 # Shown once when a session starts.
 usa_startup_modal <- shiny::modalDialog(
-  title = "ezdyn Dashboard (USA): beta",
-  shiny::p("This dashboard is a beta version of the ezdyn tool."),
+  title = "ezdyn Dashboard demo",
   shiny::p(
-    "The example code that loads models from Johannes Pfeifer's ",
-    shiny::a("DSGE_mod", href = "https://github.com/JohannesPfeifer/DSGE_mod", target = "_blank", .noWS = "outside"),
+    "This dashboard is an example of what can be built (easily!) using the ezdyn R package (",
+    shiny::a("see code", href = paste0(ezdyn_github_url, "/tree/main/dashboard_example"), target = "_blank", .noWS = "outside"),
+    ")."
+  ),
+  shiny::p("To create your own and learn more about what ezdyn can do, see ",
+           shiny::a("Sullivan and Ryan (2026)", href = "https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true", target = "_blank", .noWS = "outside"),
+           "."),
+  shiny::p(shiny::tags$b("Warning:"), " The example code that loads models from Johannes Pfeifer's ",
+    shiny::a("DSGE model library", href = "https://github.com/JohannesPfeifer/DSGE_mod", target = "_blank", .noWS = "outside"),
     " collection is experimental. Treat the results from those models as indicative only."
   ),
   shiny::p(
-    "Feedback is welcome: please ",
+    shiny::tags$b("Feedback is welcome:")," please ",
     shiny::a("raise an issue on GitHub", href = "https://github.com/RBA-ER-Replication/ezdyn/issues", target = "_blank", .noWS = "outside"),
     "."
   ),
@@ -124,31 +137,58 @@ dsgemoddash_steady_state_values <- function(model) {
   values
 }
 
-# Convert SW-coded data from model units to display units, using each
-# variable's scale factor (e.g. x 4 to annualise the quarterly `robs`).
-sw_display_units <- function(data, model) {
-  varmeta <- model$M_$varmeta
-  scale <- stats::setNames(unlist(varmeta$scale_factor), varmeta$dynare_name)
-  columns <- intersect(names(data), names(scale))
-  data[columns] <- Map(`*`, data[columns], scale[columns])
-  data
-}
-
 # Build the dashboard baseline: each metadata variable's own steady-state
 # level, flat over every supplied quarter, with the FRED/SEP baseline
-# (build_us_baseline.R) overwritten in for SW's seven observables. The
-# model-consistent (non-observable) variables, including "Output", have no
-# data counterpart, so they stay at steady state.
+# (build_us_baseline.R, already in display names and units) overwritten in
+# for SW's seven observables. The model-consistent (non-observable)
+# variables, including "Output", have no data counterpart, so they stay at
+# steady state.
 sw_build_baseline <- function(model, dates) {
   values <- dsgemoddash_steady_state_values(model)
   baseline <- tibble(date = dates, !!!as.list(values))
-
-  varmeta <- model$M_$varmeta
   us_data <- openxlsx2::read_xlsx(us_baseline_path, sheet = "baseline") |>
-    sw_display_units(model) |>
-    rename(any_of(stats::setNames(varmeta$dynare_name, varmeta$display_name)))
-
+    select(-any_of("Unemployment Rate"))
   dplyr::rows_update(baseline, us_data, by = "date")
+}
+
+# Read the real-time vintages (build_us_baseline.R's inputs/us_vintages.xlsx)
+# for Optimal Policy's timeless commitment, or return `NULL`, so the dashboard
+# runs with ordinary commitment, if there's no vintages workbook or it's out
+# of date (its latest vintage isn't the quarter before `forecast_start`, so
+# it was built for a different baseline).
+us_read_vintages <- function(path, forecast_start) {
+  if (!file.exists(path)) {
+    message("No ", path, ", so Optimal Policy's Commitment is ordinary, not timeless, commitment. Build it with build_us_baseline.R.")
+    return(NULL)
+  }
+  vintages <- openxlsx2::read_xlsx(path, sheet = "vintages")
+  vintages$vintage <- as.Date(vintages$vintage)
+  vintages$date <- as.Date(vintages$date)
+  expected_last <- seq(forecast_start, by = "-1 quarter", length.out = 2)[[2]]
+  if (max(vintages$vintage) != expected_last) {
+    warning(
+      path, " doesn't match ", us_settings_path, "'s timeline (its latest vintage is ", max(vintages$vintage),
+      ", not ", expected_last, "), so it's ignored and Commitment is ordinary commitment. Rebuild both with build_us_baseline.R.",
+      call. = FALSE
+    )
+    return(NULL)
+  }
+  vintages
+}
+
+# Overwrite the combined baseline's "Unemployment Rate" (Gali Unemployment
+# (2010)'s, otherwise at steady state) with the US unemployment rate from the
+# FRED/SEP baseline, in per cent. The Optimal Policy tab measures its gap from
+# the tab's unemployment target.
+us_add_unemployment <- function(baseline) {
+  us_data <- openxlsx2::read_xlsx(us_baseline_path, sheet = "baseline")
+  if (!("Unemployment Rate" %in% names(baseline)) || !("Unemployment Rate" %in% names(us_data))) {
+    stop("The baseline and inputs/us_baseline.xlsx must both have \"Unemployment Rate\"; re-run build_us_baseline.R.", call. = FALSE)
+  }
+  rate <- us_data$`Unemployment Rate`[match(baseline$date, as.Date(us_data$date))]
+  if (anyNA(rate)) stop("inputs/us_baseline.xlsx doesn't cover every baseline quarter's unemployment rate.", call. = FALSE)
+  baseline[["Unemployment Rate"]] <- rate
+  baseline
 }
 
 # Read each of the 7 additional metadata variables' own steady-state level
@@ -212,13 +252,19 @@ usa_dashboard <- function() {
   # (the Alternative Paths window) cut to `alt_paths_quarters`. The baseline
   # runs on to `data_end`, which Optimal Policy uses as its longer commitment
   # horizon so `extend_baseline` can stay at its default (identity).
-  timeline <- lapply(openxlsx2::read_xlsx(us_baseline_path, sheet = "timeline"), as.Date)
+  timeline <- lapply(openxlsx2::read_xlsx(us_settings_path, sheet = "timeline"), as.Date)
   timeline$forecast_end <- seq(timeline$forecast_start, by = "quarter", length.out = alt_paths_quarters)[[alt_paths_quarters]]
-  # Real-time baselines from past quarters, for timeless commitment, in the
-  # same display units as the baseline. The earliest sets the earliest
-  # commitment start.
-  vintages <- openxlsx2::read_xlsx(us_baseline_path, sheet = "vintages") |>
-    sw_display_units(sw_model)
+  # Loss-function gaps in real-time baselines from past quarters, for timeless
+  # commitment: one `<loss variable>_gap_loss` column per loss variable,
+  # already in display units (see build_us_baseline.R). The earliest vintage
+  # sets the earliest commitment start. Optional: without them, Commitment is
+  # ordinary commitment from the forecast start.
+  vintages <- us_read_vintages(us_vintages_path, timeline$forecast_start)
+  # The current loss-function targets (2% a year inflation, the Fed's latest
+  # NAIRU estimate, no rate change), measured the same way as the vintages'.
+  # The Optimal Policy tab measures the current gaps from these by default.
+  targets <- openxlsx2::read_xlsx(us_settings_path, sheet = "targets")
+  targets <- stats::setNames(as.numeric(targets$target), targets$variable)
 
   # `import_baseline()`'s `translate_baseline()` step only recognizes columns
   # matching ITS OWN `source_model`'s metadata (columns from other models are
@@ -234,6 +280,7 @@ usa_dashboard <- function() {
     extra_baseline <- ezdyn::import_baseline(input = extra_baseline_df, source_model = extra_model, models = models)
     baseline <- dsgemoddash_merge_new_columns(baseline, extra_baseline)
   }
+  baseline <- us_add_unemployment(baseline)
 
   config <- ezdyn::configure_dashboard(
     name = "ezdyn Dashboard (USA)",
@@ -255,31 +302,44 @@ usa_dashboard <- function() {
     # (they share "Nominal Interest Rate"/"Monetary policy shock" with SW),
     # but only Smets Wouters (2007) is selected by default - it is the only
     # model with a real historical baseline; the others use synthetic
-    # steady-state baselines.
-    alt_paths = list(defaults = list(models = "Smets Wouters (2007)")),
-    # Every model is offered. The tab only offers loss variables that every
-    # selected model has, e.g. not "Output growth" while a Gali model is
-    # selected. SW is the baseline model, as the first model.
+    # steady-state baselines. Year-ended inflation and output growth and the
+    # nominal rate are plotted by default, with anticipated shocks at an
+    # anticipation (cognitive discounting) parameter of 0.8.
+    alt_paths = list(defaults = list(
+      models = "Smets Wouters (2007)",
+      display_names = c("Inflation (year-ended)", "Output Growth (year-ended)", "Nominal Interest Rate"),
+      lambda = 0.8
+    )),
+    # Every model is offered; Smets Wouters (2007), the baseline model (as the
+    # first model), a Pfeifer NK model and an empirical model are selected by
+    # default. The tab only offers loss variables that every selected model
+    # has, e.g. not "Unemployment Rate" while SW is selected.
     optimal_policy = list(
-      defaults = list(models = c("Smets Wouters (2007)", "Gali NK (Ch.3)")),
+      defaults = list(models = c("Smets Wouters (2007)", "Gali NK+Wage (Ch.6)", "Romer-Romer (2004)")),
       instrument_variable = "Nominal Interest Rate",
       instrument_shock = "Monetary policy shock",
+      # Let the "Anticipation Parameter" input use anticipated policy shocks
+      # (`em_1`, `em_2`, ...) in models that have them: Smets Wouters (2007).
+      # It defaults to 0.8; other models always use surprise shocks.
+      use_cd = TRUE,
+      lambda = 0.8,
       forecast_end = timeline$data_end,
-      preloss_start = min(vintages$vintage),
+      # Without vintages these are NULL: the commitment start defaults to the
+      # forecast start, and Commitment is ordinary commitment.
+      preloss_start = if (!is.null(vintages)) min(vintages$vintage),
       loss_variable_vintages = vintages,
+      # The loss variables with past gaps in `vintages`, which timeless
+      # commitment needs. "Unemployment Rate" is offered while Gali
+      # Unemployment (2010), the only model with it, is the only model
+      # selected.
       loss_variable_choices = c(
-        "Inflation" = "Inflation",
-        "Output growth" = "Output Growth",
-        "Output" = "Output",
-        "Nominal interest rate" = "Nominal Interest Rate",
-        "Real wage growth" = "Real Wage Growth"
+        "Inflation", "Output", "Output Growth", "Output Growth (year-ended)",
+        "Nominal Interest Rate Changes", "Unemployment Rate"
       ),
-      constraint_variable_choices = c(
-        "Nominal interest rate" = "Nominal Interest Rate",
-        "Inflation" = "Inflation"
-      ),
-      default_response_variables = c("Inflation", "Output", "Nominal Interest Rate"),
-      default_loss_variables = c("Inflation", "Output")
+      constraint_variable_choices = c("Nominal Interest Rate", "Inflation"),
+      loss_variable_defaults = targets,
+      default_response_variables = c("Inflation (year-ended)", "Output Growth (year-ended)", "Nominal Interest Rate"),
+      default_loss_variables = c("Inflation", "Output Growth", "Nominal Interest Rate Changes")
     )
   )
 

@@ -130,6 +130,19 @@ test_that("ezdyn_own_scale applies a numeric or function scale_factor", {
   expect_equal(ezdyn_own_scale(function_meta, "unemp")(0.041), 1.041)
 })
 
+test_that("year_ended_change is the change over four quarters, the year-ended sum of quarterly changes", {
+  level <- c(1, 3, 6, 10, 15, 21, 28)
+
+  actual <- ezdyn_derived_transform_registry$year_ended_change(level)
+
+  # The first four quarters difference against zeros before the series starts.
+  expect_equal(actual, c(1, 3, 6, 10, 14, 18, 22))
+  expect_equal(
+    actual,
+    ezdyn_derived_transform_registry$year_ended_sum(ezdyn_derived_transform_registry$diff(level))
+  )
+})
+
 test_that("ezdyn_available_response_names adds derived names whose source is available", {
   varmeta <- data.frame(
     dynare_name = c("dr", "ddr", "infl_obs_ye"),

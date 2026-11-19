@@ -200,6 +200,30 @@ testthat::test_that("configure_dashboard validates Alternative Paths model selec
   )
 })
 
+testthat::test_that("configure_dashboard sets Alternative Paths' default responses and anticipation parameter", {
+  arguments <- list(
+    models = list(DINGO = dashboard_test_model("DINGO")),
+    timeline = dashboard_test_timeline(),
+    baselines = list(Staff = dashboard_test_baseline()),
+    default_baseline = "Staff"
+  )
+
+  config <- do.call(configure_dashboard, arguments)
+  testthat::expect_null(config$alt_paths$defaults$display_names)
+  testthat::expect_equal(config$alt_paths$defaults$lambda, 0.8)
+
+  config <- do.call(configure_dashboard, c(arguments, list(alt_paths = list(defaults = list(display_names = "Cash Rate", lambda = 0.5)))))
+  testthat::expect_equal(config$alt_paths$defaults$display_names, "Cash Rate")
+  testthat::expect_equal(config$alt_paths$defaults$lambda, 0.5)
+
+  for (invalid in list(list(lambda = 2), list(lambda = "high"), list(display_names = 1))) {
+    testthat::expect_error(
+      do.call(configure_dashboard, c(arguments, list(alt_paths = list(defaults = invalid)))),
+      "alt_paths\\$defaults` contains invalid"
+    )
+  }
+})
+
 testthat::test_that("configure_dashboard validates Variable Dictionary model selection", {
   arguments <- list(
     models = list(DINGO = dashboard_test_model("DINGO"), MARTIN = dashboard_test_model("MARTIN")),
@@ -263,8 +287,9 @@ testthat::test_that("configure_dashboard validates explicit optimal-policy setti
     default_baseline = "Staff"
   )
   policy_config <- list(
-    policy_model = "DINGO",
-    comparison_model = "MARTIN",
+    models = c("DINGO", "MARTIN"),
+    defaults = list(models = "MARTIN"),
+    baseline_model = "MARTIN",
     forecast_end = as.Date("2024-12-01"),
     preloss_start = as.Date("2023-12-01"),
     instrument_variable = "r_obs",
@@ -277,12 +302,30 @@ testthat::test_that("configure_dashboard validates explicit optimal-policy setti
 
   config <- do.call(configure_dashboard, c(arguments, list(optimal_policy = policy_config)))
   testthat::expect_true(config$optimal_policy$enabled)
-  testthat::expect_equal(config$optimal_policy$comparison_model, "MARTIN")
+  testthat::expect_equal(config$optimal_policy$models, c("DINGO", "MARTIN"))
+  testthat::expect_equal(config$optimal_policy$defaults$models, "MARTIN")
+  testthat::expect_equal(config$optimal_policy$baseline_model, "MARTIN")
   testthat::expect_equal(config$optimal_policy$forecast_end, as.Date("2024-12-01"))
+  testthat::expect_true(config$optimal_policy$use_cd)
+  testthat::expect_equal(config$optimal_policy$lambda, 0.8)
+
+  # Models and the baseline model default to every model and the first model.
+  default_config <- do.call(configure_dashboard, c(arguments, list(
+    optimal_policy = policy_config[setdiff(names(policy_config), c("models", "defaults", "baseline_model"))]
+  )))
+  testthat::expect_equal(default_config$optimal_policy$models, c("DINGO", "MARTIN"))
+  testthat::expect_equal(default_config$optimal_policy$defaults$models, c("DINGO", "MARTIN"))
+  testthat::expect_equal(default_config$optimal_policy$baseline_model, "DINGO")
+
   testthat::expect_false(dashboard_test_config()$optimal_policy$enabled)
   testthat::expect_error(
     do.call(configure_dashboard, c(arguments, list(optimal_policy = list(forecast_end = as.Date("2024-05-01"))))),
     "optimal_policy"
+  )
+  # The baseline model must be one of the Optimal Policy models.
+  testthat::expect_error(
+    do.call(configure_dashboard, c(arguments, list(optimal_policy = utils::modifyList(policy_config, list(models = "DINGO", defaults = list(models = "DINGO")))))),
+    "baseline_model"
   )
 })
 
@@ -320,5 +363,38 @@ testthat::test_that("configure_dashboard validates optimal-policy help/descripti
   testthat::expect_error(
     do.call(configure_dashboard, c(arguments, list(optimal_policy = invalid_config))),
     "Help hooks"
+  )
+})
+
+testthat::test_that("configure_dashboard labels unnamed loss and constraint choices with their values", {
+  model <- dashboard_test_model()
+  arguments <- list(
+    models = list(DINGO = model),
+    timeline = dashboard_test_timeline(),
+    baselines = list(Staff = dashboard_test_baseline()),
+    default_baseline = "Staff"
+  )
+  policy_config <- list(
+    policy_model = "DINGO",
+    forecast_end = as.Date("2024-12-01"),
+    preloss_start = as.Date("2023-12-01"),
+    loss_variable_choices = c("Inflation", "Cash rate changes" = "dr"),
+    constraint_variable_choices = "Cash Rate"
+  )
+
+  config <- do.call(configure_dashboard, c(arguments, list(optimal_policy = policy_config)))
+  testthat::expect_identical(config$optimal_policy$loss_variable_choices, c("Inflation" = "Inflation", "Cash rate changes" = "dr"))
+  testthat::expect_identical(config$optimal_policy$constraint_variable_choices, c("Cash Rate" = "Cash Rate"))
+
+  for (invalid in list(character(0), list("Inflation"), c("Inflation", NA))) {
+    policy_config$loss_variable_choices <- invalid
+    testthat::expect_error(do.call(configure_dashboard, c(arguments, list(optimal_policy = policy_config))), "choice-list")
+  }
+
+  policy_config$loss_variable_choices <- "Inflation"
+  policy_config$loss_variable_vintages <- data.frame(date = as.Date("2023-12-01"), Inflation_gap_loss = 0)
+  testthat::expect_error(
+    do.call(configure_dashboard, c(arguments, list(optimal_policy = policy_config))),
+    "needs `vintage` and `date` columns"
   )
 })

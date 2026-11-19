@@ -118,6 +118,12 @@ optimal_policy_constraint_table <- function(ns, policy_dates, config) {
   )
 }
 
+# Whether the configuration supplies loss-variable vintages, which timeless
+# commitment needs. Without them, the tab offers ordinary commitment.
+optimal_policy_has_vintages <- function(config) {
+  !is.null(config$optimal_policy$loss_variable_vintages)
+}
+
 #' Construct selected policy strategies from module inputs.
 #'
 #' @param input Shiny input values.
@@ -126,12 +132,27 @@ optimal_policy_constraint_table <- function(ns, policy_dates, config) {
 #' @return List of strategy specifications for [get_policy_scenarios()]. Each
 #'   strategy's `output_name` is left unset here - `get_policy_scenarios()`
 #'   builds it per model/strategy so the same strategy list works for any
-#'   number of configured models.
+#'   number of configured models. The Commitment control is timeless
+#'   commitment when the configuration supplies loss-variable vintages, and
+#'   otherwise ordinary commitment from the forecast start.
 optimal_policy_strategies <- function(input, constraints, config) {
   modes <- c("commit", "timeless", "disc")
   modes <- modes[modes %in% input$strategy_modes]
-  if ("disc" %in% modes && input$loss_horizon != input$instrument_horizon) {
-    stop("Discretion requires equal loss and optimisation horizons.", call. = FALSE)
+  if (!optimal_policy_has_vintages(config)) {
+    modes <- unique(replace(modes, modes == "timeless", "commit"))
+  }
+  # Discretion allows a longer loss horizon, but not a shorter one: a
+  # policymaker after the loss horizon would have nothing to minimise.
+  if ("disc" %in% modes && input$loss_horizon < input$instrument_horizon) {
+    stop(sprintf(
+      paste(
+        "Discretion needs a loss evaluation horizon at least as long as the optimisation horizon",
+        "(currently %d and %d quarters). Under discretion policy is re-set each quarter to minimise",
+        "the loss from that quarter on, so there is nothing to minimise after the loss evaluation",
+        "horizon. Lengthen the loss evaluation horizon or shorten the optimisation horizon."
+      ),
+      as.integer(input$loss_horizon), as.integer(input$instrument_horizon)
+    ), call. = FALSE)
   }
   lapply(modes, function(mode) {
     list(
@@ -273,7 +294,9 @@ UITab_OptimalPolicy <- function(id, config) {
         shiny::checkboxInput(ns("elb"), "ELB", FALSE),
         shiny::tags$label(shiny::tagList("Constraints", help_button(ns("help_constraints"))), class = "control-label"),
         optimal_policy_constraint_table(ns, policy_dates, config),
-        shiny::conditionalPanel(
+        # The commitment start is only meaningful for timeless commitment,
+        # which needs vintages.
+        if (optimal_policy_has_vintages(config)) shiny::conditionalPanel(
           condition = sprintf("input['%s'] && input['%s'].indexOf('timeless') !== -1", ns("strategy_modes"), ns("strategy_modes")),
           shiny::sliderInput(ns("preloss_start"), shiny::tagList("Commitment start", help_button(ns("help_commitment_start"))), min = policy$preloss_start, max = policy$forecast_start, value = policy$preloss_start, timeFormat = "%Y-%m-%d")
         ),
@@ -414,7 +437,7 @@ ServerTab_OptimalPolicy <- function(id, config) {
           )
         ),
         shiny::tagList(
-          "Model input ",
+          "Model input (advanced users only) ",
           shiny::tags$span(
             class = "fa fa-info-circle",
             title = paste(
@@ -434,6 +457,10 @@ ServerTab_OptimalPolicy <- function(id, config) {
       }
       shiny::showModal(shiny::modalDialog(
         title = "Upload Custom Baseline Paths",
+        shiny::tags$div(
+          style = "margin-bottom: 15px;",
+          shiny::downloadButton(ns("download_template"), "Download active baseline template")
+        ),
         shiny::fileInput(
           ns("uploaded_baseline"),
           "Upload a .xls or .xlsx file",
@@ -460,7 +487,6 @@ ServerTab_OptimalPolicy <- function(id, config) {
           condition = sprintf("input['%s'] === 'display'", ns("upload_interpretation")),
           shiny::p("Values are retained in the default template units without rescaling.")
         ),
-        shiny::downloadButton(ns("download_template"), "Download active baseline template"),
         footer = shiny::tagList(
           shiny::modalButton("Cancel"),
           shiny::actionButton(ns("import_baseline"), "Import baseline", class = "btn-primary")
@@ -517,8 +543,15 @@ ServerTab_OptimalPolicy <- function(id, config) {
       loss_variables <- input$loss_variables
       targets <- stats::setNames(vapply(loss_variables, function(variable) input[[paste0("target_", optimal_policy_widget_id(variable))]], numeric(1)), loss_variables)
       baseline <- optimal_policy_add_gaps(prepared_baseline(), loss_variables, targets, baseline_model)
-      constraints <- optimal_policy_constraints(input, config)
-      strategies <- optimal_policy_strategies(input, constraints, config)
+      # Invalid inputs (e.g. discretion with a loss horizon shorter than the
+      # optimisation horizon) are shown as a validation message, which Shiny
+      # never sanitises, rather than as an error.
+      strategies <- tryCatch(
+        optimal_policy_strategies(input, optimal_policy_constraints(input, config), config),
+        error = function(e) e
+      )
+      invalid <- inherits(strategies, "error")
+      shiny::validate(shiny::need(!invalid, if (invalid) conditionMessage(strategies)))
       # Warnings raised by the calculation (e.g. a model with too few
       # anticipated shocks) are shown above the graph rather than only on the
       # R console.

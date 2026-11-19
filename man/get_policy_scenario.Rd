@@ -21,7 +21,9 @@ get_policy_scenario(
 \item{policy_strategy}{Named list with `output_name`, `output_variables`,
 `loss_variables`, `loss_weights`, `discount_factor`, `T_loss`,
 `T_instrument`, and `commit` (`"commit"`, `"timeless"`, or `"disc"`).
-Optional `instrument_variable` and `instrument_shock` identify the model's
+Discretion (`"disc"`) needs `T_loss >= T_instrument`: the policymaker
+re-optimises in each instrument period, against the loss from then to
+`T_loss`. Optional `instrument_variable` and `instrument_shock` identify the model's
 policy instrument and innovation. Variable entries (`output_variables`,
 `loss_variables`, `instrument_variable`, and constraint `variable`s) may
 be display names or dynare codes, resolved against `model`; a trailing
@@ -42,7 +44,19 @@ dynare code or its display name.}
 
 \item{forecast_end}{Final forecast quarter.}
 
-\item{loss_variable_vintages}{Optional long history for timeless commitment.}
+\item{loss_variable_vintages}{Past baselines for timeless commitment
+(`commit = "timeless"`), as a long data frame: a `vintage` column (the
+quarter each baseline was made in, its first forecast quarter), a `date`
+column, and one `<loss variable>_gap_loss` column per loss variable, e.g.
+`Inflation_gap_loss`. Each gap is the loss variable minus its target as
+it stood at the time, in the same units as `baseline`; the loss squares
+it. `<loss variable>` is named as in `loss_variables` (without the
+suffix), by its display name or `model`'s own dynare code, so display
+names let one table serve every model. A historical constraint (e.g. the
+ELB) also needs the instrument's level, in a column named like
+`instrument_variable`. Each vintage runs from its own quarter to at least
+`T_loss` quarters after `forecast_start`, and vintages are needed for
+every quarter from `preloss_start` to the one before `forecast_start`.}
 
 \item{preloss_start}{First historical commitment quarter for timeless policy.}
 

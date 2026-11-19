@@ -1,8 +1,8 @@
-# DSGEModDash: ezdyn Dashboard (USA)
+# ezdyn Dashboard (USA)
 
-A multi-model [ezdyn](../../functions/ezdyn) dashboard combining the
-Smets-Wouters (2007) estimated model with 7 curated small-scale New Keynesian
-models from Johannes Pfeifer's
+A multi-model [ezdyn](../README.md) dashboard combining the Smets-Wouters
+(2007) estimated model, extended with anticipated monetary policy shocks, with
+7 curated small-scale New Keynesian models from Johannes Pfeifer's
 [DSGE_mod](https://github.com/JohannesPfeifer/DSGE_mod) collection of Dynare
 replication files, plus two semi-structural models: estimated responses to the
 Romer-Romer (2004) and Gertler-Karadi (2015) monetary policy shocks, from
@@ -10,126 +10,124 @@ McKay and Wolf (2023). Every model here has an active monetary policy shock,
 so the dashboard can be used for cross-model impulse-response policy
 exercises.
 
-## Launch the dashboard
+## Quick start
 
-Once you have run the first-time setup (below), open `app.R` in RStudio and run it, or from R:
+The model objects are already built and stored in `inputs/`, so you don't
+need MATLAB, Dynare or DSGE_mod. You only need to build the US baseline
+(`inputs/us_baseline.xlsx`), which isn't stored in this repository. Its
+timeline and loss-function targets (`inputs/us_settings.xlsx`) are stored
+here, and must match the baseline, so rebuilding the baseline rewrites them
+too.
 
-```r
-setwd("dashboard/DSGEModDash")
-source("app.R")
-```
+You need R with ezdyn installed (see [Installation](../README.md#installation))
+and a free [FRED API key](https://fred.stlouisfed.org/docs/api/api_key.html).
 
-The dashboard opens with a disclaimer: it is a beta, and the code that loads
-the DSGE_mod models is experimental, so their results are indicative only.
-Buttons under the title download the ezdyn whitepaper (`ezdyn.pdf` from
-GitHub) and open a new GitHub issue to report a problem.
+1. Add your FRED API key to your user-level `~/.Renviron` (open it with
+   `usethis::edit_r_environ()`), then restart R:
 
-## First-time setup
+   ```
+   FRED_API_KEY=<your key>
+   ```
 
-Run these steps from a clone of this repository, with MATLAB (+ Dynare) and R
-available on your PATH.
+2. Fetch the US data from FRED and build the baseline. From the repo root:
 
-### 1. Clone DSGE_mod into this folder
+   ```powershell
+   Rscript dashboard_example/fetch_us_fred.R
+   Rscript dashboard_example/build_us_baseline.R
+   ```
 
-```powershell
-cd dashboard/DSGEModDash
-git clone https://github.com/JohannesPfeifer/DSGE_mod.git DSGE_mod
-```
+   `fetch_us_fred.R` downloads everything from FRED (taking a couple of
+   minutes, mostly for the real-time vintages) and saves it, unprocessed, to
+   `inputs/us_fred_raw.rds`. `build_us_baseline.R` turns that into three
+   workbooks, without calling FRED, so it can be re-run freely after changing
+   the processing:
 
-The folder must be named exactly `DSGE_mod` (matching what a fresh `git
-clone` of that repo produces) - `build_new_models.m` looks for it at
-`dashboard/DSGEModDash/DSGE_mod`. This folder is a separate git repository
-(it has its own `.git`) and is intentionally excluded from this repo's git
-tracking (see `.gitignore`).
+   | Workbook | Contents | In git |
+   |---|---|---|
+   | `inputs/us_baseline.xlsx` | The baseline data | No |
+   | `inputs/us_settings.xlsx` | The timeline and loss-function targets | Yes |
+   | `inputs/us_vintages.xlsx` | Real-time vintages for Optimal Policy's timeless commitment (optional) | No |
 
-### 2. Build the Dynare model objects (MATLAB)
+   The dashboard needs the first two. Without the vintages, or if they don't
+   match the timeline, it still launches, with a message: Optimal Policy's
+   Commitment is then ordinary commitment from the forecast start, with no
+   "Commitment start" control. Re-run both scripts after each data release or
+   SEP to refresh the data, and commit the updated `us_settings.xlsx`. See
+   [US baseline data](#us-baseline-data) for what they build.
 
-From the repo root:
+3. Launch the dashboard. From the repo root, in R:
 
-```powershell
-matlab.exe -batch "run('dashboard/DSGEModDash/build_new_models.m')"
-```
+   ```r
+   shiny::runApp("dashboard_example")
+   ```
 
-This runs all 8 models (Smets-Wouters 2007 + the 7 curated NK models)
-through Dynare and exports their `M_`/`oo_` objects as JSON into
-`dashboard/DSGEModDash/inputs/`, plus a CSV export of SW's real historical
-US estimation sample.
+   Or open `app.R` in RStudio and click **Run App**.
 
-### 3. Build the variable/shock/parameter metadata (R)
+The dashboard opens with a short introduction, which warns that the code that
+loads the DSGE_mod models is experimental, so their results are indicative
+only. Links under the title open the ezdyn whitepaper (`ezdyn.pdf` on GitHub)
+and a new GitHub issue to report a problem.
 
-From `dashboard/DSGEModDash`:
+To rebuild the model objects yourself, for example to reproduce them or change
+a model, see [Rebuilding the model objects](#rebuilding-the-model-objects).
 
-```powershell
-Rscript build_model_metadata.R
-```
+## Models
 
-This reads the JSON files produced in step 2 and writes one metadata
-workbook per model into `dashboard/DSGEModDash/inputs/`.
+| Dashboard name | Source | Built by |
+|---|---|---|
+| Smets Wouters (2007) | This repository: [`Smets_Wouters_2007_anticipated/`](Smets_Wouters_2007_anticipated/), a version of DSGE_mod's `Smets_Wouters_2007/Smets_Wouters_2007_45.mod` with anticipated monetary policy shocks (see [Smets-Wouters with anticipated monetary policy shocks](#smets-wouters-with-anticipated-monetary-policy-shocks)) | `Smets_Wouters_2007_anticipated/build_sw_anticipated.m` |
+| Gali NK (Ch.3) | DSGE_mod: `Gali_2015/Gali_2015_chapter_3.mod` | `build_new_models.m` |
+| Gali NK+Wage (Ch.6) | DSGE_mod: `Gali_2015/Gali_2015_chapter_6.mod` | `build_new_models.m` |
+| Gali SOE (Ch.8) | DSGE_mod: `Gali_2015/Gali_2015_chapter_8.mod` | `build_new_models.m` |
+| Gali Unemployment (2010) | DSGE_mod: `Gali_2010/Gali_2010.mod` | `build_new_models.m` |
+| Ireland (2004) | DSGE_mod: `Ireland_2004/Ireland_2004.mod` | `build_new_models.m` |
+| Ascari-Sbordone (2014) | DSGE_mod: `Ascari_Sbordone_2014/Ascari_Sbordone_2014.mod` | `build_new_models.m` |
+| Born-Pfeifer (2018) | DSGE_mod: `Born_Pfeifer_2018/Monetary_Policy_IRFs/Born_Pfeifer_2018_MP.mod` | `build_new_models.m` |
+| Romer-Romer (2004), Gertler-Karadi (2015) | McKay and Wolf's (2023) published estimates (see [Semi-structural models](#semi-structural-models)) | `build_semi_structural_models.R` |
 
-### 4. Build the US baseline from FRED (R)
-
-Get a free [FRED API key](https://fred.stlouisfed.org/docs/api/api_key.html)
-and add it to your user-level `~/.Renviron` (open it with
-`usethis::edit_r_environ()`), then restart R:
-
-```
-FRED_API_KEY=<your key>
-```
-
-Then, from `dashboard/DSGEModDash`:
-
-```powershell
-Rscript build_us_baseline.R
-```
-
-This writes `inputs/us_baseline.xlsx` (see [US baseline data](#us-baseline-data)
-below). It takes a couple of minutes, mostly fetching the real-time vintages.
-Re-run it after each data release or SEP to refresh the baseline.
-
-### 5. Build the semi-structural models (R)
-
-From `dashboard/DSGEModDash`:
-
-```powershell
-Rscript build_semi_structural_models.R
-```
-
-This downloads McKay and Wolf's (2023) published estimates and writes
-`inputs/semi_structural_irfs.csv` and `inputs/semi_structural_metadata.xlsx`
-(see [Semi-structural models](#semi-structural-models) below). No API key is
-needed.
+`build_new_models.m` runs the 7 DSGE_mod models from a clone of DSGE_mod. The
+Smets-Wouters model is not pulled from DSGE_mod: its anticipated-shocks
+version, with the data and posterior mode it needs, is kept in this
+repository. `build_model_metadata.R` builds every DSGE model's
+variable/shock/parameter metadata workbook.
 
 ## US baseline data
 
 `build_us_baseline.R` builds the dashboard's US data from
-[FRED](https://fred.stlouisfed.org/): history for Smets-Wouters' seven
-observables, extended with the medians from the Fed's latest Summary of
-Economic Projections (SEP). `inputs/us_baseline.xlsx` has four sheets:
+[FRED](https://fred.stlouisfed.org/) data saved by `fetch_us_fred.R`:
+history for Smets-Wouters' seven observables and the unemployment rate,
+extended with the medians from the Fed's latest Summary of Economic
+Projections (SEP). It writes three workbooks:
 
-| Sheet | Contents | Used by |
-|---|---|---|
-| `baseline` | History and forecast in dashboard units: headline growth rates, hours relative to their long-run level | The dashboard baseline |
-| `model_data` | The same data in Smets-Wouters' own definitions: per-person growth rates, demeaned hours | Re-running SW over current data and forecasts (e.g. for shock decompositions) |
-| `timeline` | `data_start`, `data_end`, `forecast_start`, `forecast_end` | The dashboard timeline |
-| `vintages` | `baseline` as known in each of the last 12 quarters | Optimal Policy's timeless commitment |
+| Workbook | Sheet | Contents | Used by |
+|---|---|---|---|
+| `us_baseline.xlsx` | `baseline` | History and forecast in display names and units: headline growth rates, hours relative to their long-run level, the annualised nominal rate, and "Unemployment Rate" | The dashboard baseline ("Unemployment Rate" is Gali Unemployment (2010)'s) |
+| | `model_data` | The same data in Smets-Wouters' own definitions and Dynare names: per-person growth rates, demeaned hours, the quarterly rate `robs` | Re-running SW over current data and forecasts (e.g. for shock decompositions) |
+| `us_settings.xlsx` (tracked in git) | `timeline` | `data_start`, `data_end`, `forecast_start`, `forecast_end` | The dashboard timeline |
+| | `targets` | The current loss-function targets in display units: inflation 0.5% a quarter (2% a year), unemployment and output growth (quarterly and year-ended) at the latest SEP longer-run rates, no rate change | The Optimal Policy tab's default targets |
+| `us_vintages.xlsx` (optional) | `vintages` | Loss-function gaps (each variable less its target at the time) in each of the last 12 quarters' baselines, in display units | Optimal Policy's timeless commitment |
+| | `vintage_levels` | `baseline` as known in each of the last 12 quarters, plus that quarter's targets (`<display name> target`) | The source of `vintages` |
 
 Quarters are dated the first day of their last month (Q3 = `YYYY-09-01`).
-Growth rates are quarterly log changes x 100, not annualised. The sheets store
-the nominal rate `robs` as Smets and Wouters define it, quarterly (fed funds
-rate / 4); the dashboard shows it annualised (see
-[Common variables](#common-variables)).
+Growth rates are quarterly log changes x 100, not annualised. The script
+builds everything in the dashboard's display names and units, so the
+dashboard reads the sheets without conversion: "Nominal Interest Rate" is the
+fed funds rate itself (annualised, see [Common variables](#common-variables)).
+Only `model_data` converts, to Smets and Wouters' own definitions and Dynare
+names, including the quarterly rate `robs` (fed funds rate / 4).
 
 ### History
 
-| Observable | `baseline` | `model_data` | FRED series |
+| Display name (SW code) | `baseline` | `model_data` | FRED series |
 |---|---|---|---|
-| `dy` Output growth | Real GDP growth | Real GDP growth per person | `GDPC1`, `CNP16OV` |
-| `dc` Consumption growth | Real consumption growth | Real consumption growth per person | `PCEC`, `GDPDEF`, `CNP16OV` |
-| `dinve` Investment growth | Real fixed investment growth | Real fixed investment growth per person | `FPI`, `GDPDEF`, `CNP16OV` |
-| `labobs` Hours worked | Log hours per person, zero once unemployment is at its longer-run rate | Log hours per person, demeaned over the history | `PRS85006023`, `CE16OV`, `CNP16OV` |
-| `pinfobs` Inflation | GDP deflator inflation | Same | `GDPDEF` |
-| `dw` Real wage growth | Growth in hourly compensation deflated by the GDP deflator | Same | `COMPNFB`, `GDPDEF` |
-| `robs` Interest rate | Effective fed funds rate / 4 | Same | `FEDFUNDS` |
+| Output Growth (`dy`) | Real GDP growth | Real GDP growth per person | `GDPC1`, `CNP16OV` |
+| Consumption Growth (`dc`) | Real consumption growth | Real consumption growth per person | `PCEC`, `GDPDEF`, `CNP16OV` |
+| Investment Growth (`dinve`) | Real fixed investment growth | Real fixed investment growth per person | `FPI`, `GDPDEF`, `CNP16OV` |
+| Hours Worked (`labobs`) | Log hours per person, zero once unemployment is at its longer-run rate | Log hours per person, demeaned over the history | `PRS85006023`, `CE16OV`, `CNP16OV` |
+| Inflation (`pinfobs`) | GDP deflator inflation | Same | `GDPDEF` |
+| Real Wage Growth (`dw`) | Growth in hourly compensation deflated by the GDP deflator | Same | `COMPNFB`, `GDPDEF` |
+| Nominal Interest Rate (`robs`) | Effective fed funds rate | Effective fed funds rate / 4 | `FEDFUNDS` |
+| Unemployment Rate | Unemployment rate (not in `model_data`) | | `UNRATE` |
 
 - Nominal consumption and investment are deflated by the GDP deflator,
   following Smets and Wouters (2007).
@@ -155,10 +153,10 @@ The forecast uses four SEP medians:
 
 | SEP projection | FRED series | Drives |
 |---|---|---|
-| Real GDP growth, Q4 to Q4 | `GDPC1MD`, `GDPC1MDLR` | `dy`, and through it `dc`, `dinve`, `dw` |
-| PCE inflation, Q4 to Q4 | `PCECTPIMD`, `PCECTPIMDLR` | `pinfobs` |
-| Unemployment rate, Q4 average | `UNRATEMD`, `UNRATEMDLR` | `labobs` |
-| Fed funds rate, end of year | `FEDTARMD`, `FEDTARMDLR` | `robs` |
+| Real GDP growth, Q4 to Q4 | `GDPC1MD`, `GDPC1MDLR` | Output Growth, and through it Consumption Growth, Investment Growth and Real Wage Growth |
+| PCE inflation, Q4 to Q4 | `PCECTPIMD`, `PCECTPIMDLR` | Inflation |
+| Unemployment rate, Q4 average | `UNRATEMD`, `UNRATEMDLR` | Unemployment Rate, and through it Hours Worked |
+| Fed funds rate, end of year | `FEDTARMD`, `FEDTARMDLR` | Nominal Interest Rate |
 
 Each SEP value is an anchor in Q4 of its year, and each quarterly path runs
 linearly from the last observation to those anchors:
@@ -201,19 +199,58 @@ For series the SEP doesn't cover:
 
 Timeless commitment assumes the Fed committed to its policy in some past
 quarter (the tab's "Commitment start"). It re-solves each quarter since then
-using the baseline as it looked at the time. The `vintages` sheet holds one
-such baseline for each of the last 12 quarters (`vintage_quarters` in the
-script). Each is built from FRED's real-time data (ALFRED) as known at the end
-of that quarter, so it includes data to the quarter before and that
+using the baseline as it looked at the time. The vintages are a separate,
+optional dependency in `us_vintages.xlsx`: without them, the tab's Commitment
+is ordinary commitment from the forecast start. Its `vintage_levels` sheet holds
+one such baseline for each of the last 12 quarters (`vintage_quarters` in
+`fetch_us_fred.R`). Each is built from FRED's real-time data (ALFRED) as known
+at the end of that quarter, so it includes data to the quarter before and that
 quarter's SEP. It uses the same definitions and assumptions as above and runs
 to the current `data_end`. The earliest vintage is the earliest Commitment
 start the tab offers.
 
-Smets-Wouters' monetary policy shock is always a surprise. Future policy moves
-can't change today's expectations, so commitment, timeless commitment and
-discretion give the same optimal path for SW. They only differ in a model with
-anticipated policy shocks. None of the dashboard's models has them, so the tab
-shows one optimal path for each selected model.
+The loss function only needs each loss variable's gap from its target, so
+the `vintages` sheet (what the dashboard reads) holds those gaps, measured
+from the targets as they stood at the time. ezdyn reads one
+`<loss variable>_gap_loss` column per loss variable, named by its display
+name and in dashboard units, as `vintage` and `date` rows:
+
+| Column | Gap | Target |
+|---|---|---|
+| `Inflation_gap_loss` | GDP deflator inflation (quarterly) less the target | 2% a year (0.5% a quarter), the Fed's target |
+| `Nominal Interest Rate Changes_gap_loss` | Quarterly change in the annualised fed funds rate | No change |
+| `Unemployment Rate_gap_loss` | Unemployment rate less the target, in percentage points | The Fed's NAIRU estimate at the time: the SEP's longer-run unemployment median (`UNRATEMDLR`) in that quarter |
+| `Output Growth_gap_loss` | Quarterly real GDP growth less the target | The Fed's estimate of potential growth at the time: the SEP's longer-run GDP growth median (`GDPC1MDLR`) in that quarter, converted to a quarterly log change |
+| `Output Growth (year-ended)_gap_loss` | Real GDP growth over the last four quarters (the sum of quarterly growth) less the target | The same potential growth estimate, as a log change over the year |
+| `Output_gap_loss` | Zero: SW's "Output" has no data and stays at steady state, as in the baseline | Steady state |
+
+It also has `Nominal Interest Rate` (annualised), the instrument's level, for
+the ELB. `vintage_levels` holds each vintage's `baseline` columns and its
+targets, in display units: `Inflation target`, `Unemployment Rate target`
+(that NAIRU estimate), and `Output Growth target` and `Output Growth
+(year-ended) target` (that potential growth estimate, as quarterly and
+year-ended log changes). Each gap in `vintages` is the level less its target.
+
+Timeless commitment needs a vintage column for every loss variable selected,
+so the tab offers only these six as loss variables (Inflation, Output Growth and
+Nominal Interest Rate Changes by default). "Unemployment Rate" is offered
+only while Gali Unemployment (2010), the only model with it, is the only
+model selected. Its baseline is the US unemployment rate (the `baseline`
+sheet's "Unemployment Rate", history then the path to the SEP), not the
+model's steady state.
+
+The tab measures the current quarter's gaps from its target inputs, which
+default to the `targets` sheet: the same targets the vintages use, as they
+stand today. So by default the current unemployment gap is from the Fed's
+latest NAIRU estimate, and each vintage's from the estimate of its time.
+
+Commitment, timeless commitment and discretion only give different optimal
+paths in a model with anticipated policy shocks, with the Anticipation
+Parameter above 0. In this dashboard that is Smets-Wouters (see
+[Smets-Wouters with anticipated monetary policy shocks](#smets-wouters-with-anticipated-monetary-policy-shocks)).
+The other models' policy shocks are always surprises: future policy moves
+can't change today's expectations, so the tab shows one optimal path for each
+of them.
 
 ## Semi-structural models
 
@@ -252,10 +289,12 @@ inflation fall after an RR shock. After a GK shock they rise slightly at first
 | `ygap` | Output Gap | Output gap response (%) |
 | `output` | Output | Same as the output gap (the shock doesn't move potential output) |
 | `dy` | Output Growth | Quarterly change in the output gap |
+| `dy_ye` | Output Growth (year-ended) | Sum of the last four quarters of `dy` |
 | `pinfobs` | Inflation | Annualised inflation / 4 |
 | `pinfobs_ye` | Inflation (year-ended) | Sum of the last four quarters of `pinfobs` |
 | `robs` | Nominal Interest Rate | Fed funds rate (stored as fed funds rate / 4, shown x 4) |
 | `robs_q` | Nominal Interest Rate (quarterly) | Fed funds rate / 4 |
+| `robs_change` | Nominal Interest Rate Changes | Quarterly change in the annualised fed funds rate (not in Alternative Paths) |
 
 Codes, names and units match Smets-Wouters', so the models use the
 dashboard's US baseline and Optimal Policy settings unchanged. Each shock is
@@ -265,11 +304,12 @@ scaled so the fed funds rate peaks 100bp (annualised) above baseline.
 
 - **Impulse Response Library**: responses to the "Monetary policy shock",
   comparable with the other models.
-- **Optimal Policy**: Gertler-Karadi (2015) is selected by default alongside
-  SW, so its optimal path is shown next to SW's. While it is selected, the
-  tab doesn't offer response or loss variables it lacks (e.g. real wage
-  growth). Because output and inflation rise at first after a GK rate rise,
-  its optimal path can move rates the opposite way to SW's in the short run.
+- **Optimal Policy**: Romer-Romer (2004) is selected by default, alongside SW
+  and Gali NK+Wage (Ch.6), so its optimal path is shown next to theirs.
+  Gertler-Karadi (2015) is selectable. While either is selected, the tab
+  doesn't offer response or loss variables it lacks (e.g. real wage growth).
+  Because output and inflation rise at first after a GK rate rise, GK's
+  optimal path can move rates the opposite way to SW's in the short run.
   Beyond the first few years its path is unreliable: with a 40-quarter horizon
   and no ELB, it keeps cutting, to about -23% by quarter 40, because cuts that
   late only take effect after the loss horizon ends. Turn on the ELB or shorten
@@ -284,9 +324,89 @@ scaled so the fed funds rate peaks 100bp (annualised) above baseline.
 - **Not available**: Historical Shock Decomposition (there are no smoothed
   shocks), and hours or wage variables.
 
+## Smets-Wouters with anticipated monetary policy shocks
+
+The dashboard's Smets-Wouters model is DSGE_mod's replication of Smets and
+Wouters (2007), `Smets_Wouters_2007_45.mod`, with 60 anticipated monetary
+policy shocks added: `em_1` to `em_60`. It is kept in
+[`Smets_Wouters_2007_anticipated/`](Smets_Wouters_2007_anticipated/) rather
+than pulled from DSGE_mod.
+
+### Timing
+
+A shock announced i quarters ahead is `em_<i+1>`. It hits the monetary policy
+shock process `ms` i quarters after it is announced:
+
+| Shock | Announced |
+|---|---|
+| `em_1` | 0 quarters ahead: a surprise, the same as the original `em` |
+| `em_2` | 1 quarter ahead |
+| ... | ... |
+| `em_60` | 59 quarters ahead |
+
+This is ezdyn's naming convention for anticipated shocks: ezdyn looks for
+`<shock>_1`, `<shock>_2`, ... to build partially anticipated policy paths (see
+`ezdyn::get_anticipated_shocks()`).
+
+The shocks enter `ms` in the same place as `em`, its innovation. Announced
+shocks wait in news states `ms_news_1` to `ms_news_59`, where `ms_news_j` holds
+the shocks due in j quarters:
+
+```
+ms         = crhoms*ms(-1) + em + em_1 + ms_news_1(-1)
+ms_news_j  = ms_news_{j+1}(-1) + em_{j+1}     (j = 1, ..., 58)
+ms_news_59 = em_60
+```
+
+### Estimates are unchanged
+
+The anticipated shocks have zero variance and aren't estimated. So the
+likelihood at the posterior mode, the smoothed shocks and variables, and the
+responses to every other shock are the same as in the original model. The mod
+file also drops the original's prior plot of the Phillips curve slope, its
+LaTeX output and its `shock_decomposition` call, none of which the dashboard
+uses.
+
+### Why 60
+
+Optimal Policy needs one anticipated shock per quarter of its optimisation
+horizon, plus one per quarter of timeless-commitment history back to the
+commitment start. With the current baseline that is up to 48 + 12 = 60
+quarters. When anticipation is on, the tab skips a model with too few and
+says so. To change the number, edit `n_anticipated` at the top of
+`Smets_Wouters_2007_45_anticipated.mod` and rebuild (see
+[Rebuilding the model objects](#rebuilding-the-model-objects)).
+
+### In the dashboard
+
+- **Optimal Policy**: SW is selected by default, with Gali NK+Wage (Ch.6) and
+  Romer-Romer (2004). With the
+  Anticipation Parameter above 0 (0.8 by default), Smets-Wouters uses its
+  anticipated shocks, so commitment, timeless commitment and discretion give
+  different paths. The other models only have surprise policy shocks, so the
+  tab shows one optimal path for each of them. The tab plots year-ended
+  inflation and output growth and the nominal interest rate by default.
+- **Alternative Paths**: "Use anticipated shocks when supported" uses `em_1`
+  to `em_10`, one per quarter of the window, with the cognitive discounting
+  parameter at 0.8 by default. It plots the same three variables by default.
+- **Impulse Response Library**: Custom IRF's cognitive discounting uses
+  them. The shocks have no metadata rows, so the shock lists don't offer
+  them.
+- **Historical Shock Decomposition**: they play no part. The estimation and
+  smoother don't use them (zero variance), so their smoothed values are zero,
+  and `build_sw_anticipated.m` stops if they aren't. The decomposition is the
+  same as the original model's, with zero contributions from the anticipated
+  shocks. They have no metadata rows, so every shock grouping puts them in
+  "Other", with a zero contribution.
+- **Shock groupings**: SW's metadata offers two: "Demand/Supply/Monetary",
+  and "All Shocks", which shows each shock on its own. "All Shocks" would put
+  any measurement errors (`is_measurement_error`) together in one
+  "Measurement errors" group, but SW has none: it is estimated with seven
+  structural shocks for its seven observables.
+
 ## Common variables
 
-Every DSGE model (Smets-Wouters and the 7 Pfeifer models) has these six
+Every DSGE model (Smets-Wouters and the 7 Pfeifer models) has these nine
 variables under the same name and units, so they can be compared across
 models in the Impulse Response Library and Alternative Paths:
 
@@ -296,8 +416,11 @@ models in the Impulse Response Library and Alternative Paths:
 | Inflation (year-ended) | Per cent (year-ended) |
 | Nominal Interest Rate | Per cent (annualized) |
 | Nominal Interest Rate (quarterly) | Per cent (quarterly) |
+| Nominal Interest Rate Changes | Percentage points (annualized) |
 | Hours Worked | Per cent deviation from steady state |
 | Output | Per cent deviation from steady state |
+| Output Growth | Per cent (quarterly) |
+| Output Growth (year-ended) | Per cent (year-ended) |
 
 Each comes from the model variable below. In every model:
 
@@ -307,6 +430,19 @@ Each comes from the model variable below. In every model:
   with a `scale_formula` of 4. In the US baseline it is the effective fed
   funds rate. "Nominal Interest Rate (quarterly)" is a derived row that scales
   it back by 1/4.
+- "Nominal Interest Rate Changes" is the quarterly change in the annualised
+  rate (the `diff` transform), e.g. for interest-rate smoothing in the
+  Optimal Policy loss function. It isn't offered in Alternative Paths.
+- "Output Growth" is the model's own output growth variable in SW (`dy`) and
+  Ireland (`ghat`). Every other model gets a derived row, the quarterly
+  change in "Output" (the `diff` transform): the deviation of output growth
+  from trend, as SW's `dy` is (`dy = y - y(-1)` plus a constant trend). In
+  the US baseline it is real GDP growth.
+- "Output Growth (year-ended)" is output growth over the last four quarters:
+  the sum of the last four quarters of SW's and Ireland's own output growth
+  (the `year_ended_sum` transform), and in every other model the change in
+  "Output" over four quarters (the `year_ended_change` transform), which is
+  the same thing (ezdyn can't derive a variable from a derived one).
 - Every other interest rate is annualised the same way (x 4): the Gali
   models', Ascari-Sbordone's and Born-Pfeifer's real and natural rates, and
   SW's model-consistent nominal rate `r`.
@@ -315,8 +451,9 @@ Because the policy instrument is annualised, the Alternative Paths sliders,
 Custom IRF targets and Optimal Policy rate settings (loss targets, bounds and
 the 0.1% ELB) are all in annual per cent.
 
-The semi-structural models also have "Inflation (year-ended)" and "Nominal
-Interest Rate (quarterly)" (see their Variables table above).
+The semi-structural models also have "Inflation (year-ended)", "Nominal
+Interest Rate (quarterly)", "Nominal Interest Rate Changes", "Output Growth"
+and "Output Growth (year-ended)" (see their Variables table above).
 
 | Model | Inflation | Nominal Interest Rate | Hours Worked | Output |
 |---|---|---|---|---|
@@ -352,6 +489,11 @@ Where a model's own label differs (e.g. "Price Inflation", "Employment"),
   margin: employment is the only labour input in production. So hours worked
   move one-for-one with employment. This is the model's own assumption, not
   an approximation added here.
+- **Gali (2010)'s unemployment rate is a level.** The model's `urhat` is the
+  unemployment rate's deviation from steady state, in percentage points. Its
+  units are "Per cent (of the labour force)", like an interest rate: the
+  model moves it in percentage points around a baseline in per cent, the US
+  unemployment rate.
 - **Ireland (2004) hours equal detrended output.** Technology is
   `Y_t = Z_t * h_t` (Ireland 2004, eq. 6), so hours equal output relative to
   technology, `Y_t / Z_t`. That is the model's `yhat`, for every shock.
@@ -406,26 +548,111 @@ The build scripts set each variable's plot axis symbols from its `units`:
 |---|---|---|
 | Per cent (quarterly, annualized or year-ended) | ppt | % |
 | Per cent deviation from steady state | % dev | % dev |
-| Percentage points deviation from steady state | ppt | ppt |
+| Percentage points (deviation from steady state, or a change) | ppt | ppt |
 
 Impulse responses use `unit_symbol_irf`, because they are changes from
 baseline: a rate moves in percentage points. Alternative Paths use
 `unit_symbol_baseline`, because they plot levels: a rate is a per cent.
 `build_model_metadata.R` stops if a variable has units without a symbol.
 
+## Rebuilding the model objects
+
+You only need this to reproduce or change the model objects and metadata in
+`inputs/`; they are already built (see [Quick start](#quick-start)). Run these
+steps from a clone of this repository, with MATLAB (+ Dynare) and R available
+on your PATH. The MATLAB scripts use the Dynare on your MATLAB path, or else
+the folder in `dynare_matlab_dir` at the top of each script.
+
+### 1. Smets-Wouters with anticipated shocks (MATLAB)
+
+From the repo root:
+
+```powershell
+matlab -batch "run('dashboard_example/Smets_Wouters_2007_anticipated/build_sw_anticipated.m')"
+```
+
+This runs `Smets_Wouters_2007_45_anticipated.mod` through Dynare and writes
+`inputs/SW_2007_45.json`, plus a CSV export of SW's historical US estimation
+sample (`inputs/usmodel_data.csv`). Everything it needs is in
+`Smets_Wouters_2007_anticipated/`, so it doesn't need DSGE_mod.
+
+### 2. The DSGE_mod models (MATLAB)
+
+Clone DSGE_mod into `dashboard_example/`:
+
+```powershell
+cd dashboard_example
+git clone https://github.com/JohannesPfeifer/DSGE_mod.git DSGE_mod
+```
+
+The folder must be named exactly `DSGE_mod` (matching what a fresh `git
+clone` of that repo produces): `build_new_models.m` looks for it at
+`dashboard_example/DSGE_mod`. This folder is a separate git repository (it has
+its own `.git`) and is excluded from this repo's git tracking (see
+`.gitignore`).
+
+Then, from the repo root:
+
+```powershell
+matlab -batch "run('dashboard_example/build_new_models.m')"
+```
+
+This runs the 7 curated NK models through Dynare and exports their `M_`/`oo_`
+objects as JSON into `inputs/`. It doesn't build Smets-Wouters (step 1 does).
+
+### 3. Build the variable/shock/parameter metadata (R)
+
+From `dashboard_example/`:
+
+```powershell
+Rscript build_model_metadata.R
+```
+
+This reads the JSON files from steps 1 and 2 and writes one metadata workbook
+per model into `inputs/` (Smets-Wouters' is `variable_metadata.xlsx`).
+
+### 4. Build the semi-structural models (R)
+
+From `dashboard_example/`:
+
+```powershell
+Rscript build_semi_structural_models.R
+```
+
+This downloads McKay and Wolf's (2023) published estimates and writes
+`inputs/semi_structural_irfs.csv` and `inputs/semi_structural_metadata.xlsx`
+(see [Semi-structural models](#semi-structural-models)). No API key is
+needed.
+
+The US baseline is built as in the [Quick start](#quick-start).
+
 ## Files
 
-- `build_new_models.m` - builds all 8 models' Dynare JSON objects (MATLAB).
-- `build_model_metadata.R` - builds all 8 models' variable/shock/parameter
-  metadata workbooks (R).
-- `build_us_baseline.R` - builds the US baseline, timeline and real-time
-  vintages from FRED (R).
+- `app.R` - deploy entrypoint; sources `usa_dashboard.R` and returns the app.
+- `usa_dashboard.R` - dashboard composition (paths, timeline, model list,
+  `configure_dashboard()` call, `usa_dashboard()` function).
+- `fetch_us_fred.R` - fetches the US data and real-time vintages from FRED
+  and saves them to `inputs/us_fred_raw.rds` (R; needs a FRED API key).
+- `build_us_baseline.R` - builds the US baseline, timeline, targets and
+  vintages from `inputs/us_fred_raw.rds` (R; no FRED calls).
+- `Smets_Wouters_2007_anticipated/` - Smets-Wouters with anticipated monetary
+  policy shocks:
+  - `Smets_Wouters_2007_45_anticipated.mod` - the Dynare model (GPL v3, like
+    the DSGE_mod original it is based on).
+  - `usmodel_data.mat`, `usmodel_mode.mat` - the estimation data and
+    posterior mode, copied unchanged from DSGE_mod's `Smets_Wouters_2007/`.
+  - `build_sw_anticipated.m` - builds `inputs/SW_2007_45.json` (MATLAB).
+- `build_new_models.m` - builds the 7 DSGE_mod models' Dynare JSON objects
+  (MATLAB).
+- `build_model_metadata.R` - builds every DSGE model's variable/shock/parameter
+  metadata workbook (R).
 - `build_semi_structural_models.R` - builds the Romer-Romer and
   Gertler-Karadi semi-structural models from McKay and Wolf's (2023) estimates
   (R).
-- `usa_dashboard.R` - dashboard composition (paths, timeline, model list,
-  `configure_dashboard()` call, `usa_dashboard()` function).
-- `app.R` - deploy entrypoint; sources `usa_dashboard.R` and returns the app.
-- `DSGE_mod/` - cloned separately (step 1 above), not tracked in this repo.
-- `inputs/` - generated by steps 2-5 above, not tracked in this repo (see
-  `.gitignore`) - regenerate locally rather than committing these.
+- `inputs/` - the built model objects, metadata workbooks and semi-structural
+  responses, stored in this repo, along with `us_settings.xlsx` (the US
+  timeline and loss-function targets). `us_fred_raw.rds`, `us_baseline.xlsx`
+  and `us_vintages.xlsx` are the exceptions: you build them yourself
+  ([Quick start](#quick-start)) and they aren't tracked.
+- `DSGE_mod/` - cloned separately ([Rebuilding the model
+  objects](#2-the-dsge_mod-models-matlab)), not tracked.

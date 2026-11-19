@@ -267,6 +267,91 @@ testthat::test_that("discretionary policy implements time-varying lower bounds",
   testthat::expect_equal(shocks, c(1, 1), tolerance = 1e-6)
 })
 
+# Responses at t to a shock in period s, for a shock whose effect `irf`
+# doesn't depend on when it arrives.
+policy_test_shifted_irf <- function(irf, horizon, instruments) {
+  dY <- array(0, c(1, horizon, instruments), list("infl_obs", NULL, NULL))
+  for (s in seq_len(instruments)) {
+    periods <- s:horizon
+    dY[1, periods, s] <- irf[periods - s + 1]
+  }
+  dY
+}
+
+testthat::test_that("discretion allows a loss horizon longer than the instrument horizon", {
+  horizon <- 4L
+  instruments <- 2L
+  beta <- 0.9
+  Y0 <- c(1, 0.8, 0.5, 0.2)
+  dY <- policy_test_shifted_irf(c(1, 0.6, 0.3, 0.1), horizon, instruments)
+  no_constraints <- ezdyn_policy_discretion_constraints(list(), dY)
+
+  shocks <- ezdyn_policy_discretion(
+    Y0 = matrix(Y0, nrow = 1, dimnames = list("infl_obs", NULL)),
+    dY = dY, weights = 1, discount_factor = beta, constraints = no_constraints
+  )
+
+  # Brute-force backward induction: the period-2 policymaker minimises the
+  # loss over periods 2-4 given the first shock; the period-1 policymaker
+  # minimises the loss over periods 1-4, anticipating that reaction.
+  loss_from <- function(period, s) {
+    values <- Y0 + as.numeric(dY[1, , ] %*% s)
+    sum(beta^(seq_len(horizon - period + 1) - 1) * values[period:horizon]^2)
+  }
+  second <- function(s1) stats::optimize(function(s2) loss_from(2, c(s1, s2)), c(-50, 50), tol = 1e-12)$minimum
+  s1 <- stats::optimize(function(s1) loss_from(1, c(s1, second(s1))), c(-50, 50), tol = 1e-12)$minimum
+
+  testthat::expect_length(shocks, instruments)
+  testthat::expect_equal(shocks, c(s1, second(s1)), tolerance = 1e-5)
+})
+
+testthat::test_that("discretion with one instrument period matches commitment over a longer loss horizon", {
+  dY <- array(
+    c(1, 0.5, 0.6, 0.4, 0.3, 0.2),
+    dim = c(2, 3, 1),
+    dimnames = list(c("infl_obs", "y_obs"), NULL, NULL)
+  )
+  Y0 <- matrix(c(1, -0.5, 0.6, 0.2, 0.3, 0.1), nrow = 2, dimnames = list(c("infl_obs", "y_obs"), NULL))
+
+  discretion <- ezdyn_policy_discretion(Y0, dY, c(1, 0.5), 0.99, ezdyn_policy_discretion_constraints(list(), dY))
+  commitment <- ezdyn_policy_commit(Y0, dY, c(1, 0.5), 0.99, list(A_ineq = matrix(0, 0, 1), b_ineq = numeric()))
+
+  testthat::expect_equal(discretion, commitment, tolerance = 1e-8)
+})
+
+testthat::test_that("discretion explains why a loss horizon shorter than the instrument horizon is rejected", {
+  dY <- policy_test_shifted_irf(c(1, 0.5, 0.25), 3L, 3L)[, 1:2, , drop = FALSE]
+
+  testthat::expect_error(
+    ezdyn_policy_discretion(
+      Y0 = matrix(c(1, 1), nrow = 1, dimnames = list("infl_obs", NULL)),
+      dY = dY, weights = 1, discount_factor = 0.99,
+      constraints = ezdyn_policy_discretion_constraints(list(), dY)
+    ),
+    "loss horizon is 2 and the instrument horizon is 3.*quarters 3 to 3 would have no loss left to minimise"
+  )
+})
+
+testthat::test_that("get_policy_scenario() runs discretion with a longer loss horizon and rejects a shorter one", {
+  model <- load_dynare_irf_fixture()
+  dates <- seq(as.Date("2024-03-01"), by = "quarter", length.out = 4)
+  baseline <- data.frame(date = dates, r_obs = 4, infl_obs = 1)
+  strategy <- list(
+    output_name = "Discretion", output_variables = c("r_obs", "infl_obs"), loss_variables = "infl_obs",
+    loss_weights = 1, discount_factor = 0.99, T_loss = 4L, T_instrument = 2L, instrument_variable = "r_obs", commit = "disc"
+  )
+  run <- function(strategy) {
+    get_policy_scenario(strategy, baseline, model, forecast_start = dates[[1]], forecast_end = dates[[4]])
+  }
+
+  output <- run(strategy)
+  testthat::expect_setequal(unique(output$path_name), c("Baseline", "Discretion"))
+  testthat::expect_false(anyNA(output$value))
+
+  strategy$T_loss <- 1L
+  testthat::expect_error(run(strategy), "loss horizon is 1 and the instrument horizon is 2")
+})
+
 testthat::test_that("commitment constraints are respected and infeasible bounds error", {
   dY <- array(c(1, 0, 0, 1), dim = c(1, 2, 2), dimnames = list("r_obs", NULL, NULL))
   Y0 <- matrix(c(-1, -1), nrow = 1, dimnames = list("r_obs", NULL))
@@ -366,4 +451,92 @@ testthat::test_that("the same display-name policy_strategy and baseline run agai
 
   testthat::expect_setequal(actual_a$display_name, c("Cash Rate", "Inflation"))
   testthat::expect_setequal(actual_b$display_name, c("Cash Rate", "Inflation"))
+})
+
+# A timeless-commitment setup shared by two models with different codes: a
+# display-name baseline with its own gap column, and one past vintage
+# (2023-12-01) keyed by display names.
+policy_timeless_fixture <- function() {
+  dates <- seq(as.Date("2024-03-01"), by = "quarter", length.out = 4)
+  baseline <- data.frame(date = dates, `Cash Rate` = 4, `Inflation` = 3, check.names = FALSE)
+  baseline[["Inflation_gap_loss"]] <- baseline[["Inflation"]] - 2.5
+  vintage_dates <- seq(as.Date("2023-12-01"), by = "quarter", length.out = 5)
+  list(
+    dates = dates,
+    baseline = baseline,
+    vintages = data.frame(
+      vintage = as.Date("2023-12-01"), date = vintage_dates,
+      `Inflation_gap_loss` = c(1, 0.8, 0.6, 0.4, 0.2), `Cash Rate` = 4,
+      check.names = FALSE
+    ),
+    strategy = list(
+      output_name = "Commitment", output_variables = c("Cash Rate", "Inflation"), loss_variables = "Inflation_gap_loss",
+      loss_weights = 1, discount_factor = 0.99, T_loss = 3L, T_instrument = 3L, instrument_variable = "Cash Rate",
+      instrument_shock = "Monetary policy shock", commit = "timeless"
+    )
+  )
+}
+
+testthat::test_that("timeless commitment reads display-name `_gap_loss` vintages for models with different codes", {
+  fixture <- policy_timeless_fixture()
+  run <- function(model) {
+    get_policy_scenario(
+      fixture$strategy, fixture$baseline, model,
+      forecast_start = fixture$dates[[1]], forecast_end = fixture$dates[[4]],
+      loss_variable_vintages = fixture$vintages, preloss_start = as.Date("2023-12-01")
+    )
+  }
+
+  actual_a <- run(policy_fixture_model(c("r_obs", "infl_obs"), "eps_r"))
+  actual_b <- run(policy_fixture_model(c("cr", "pi"), "eps_mp"))
+
+  testthat::expect_setequal(unique(actual_a$path_name), c("Baseline", "Commitment"))
+  testthat::expect_equal(actual_a$value, actual_b$value)
+})
+
+testthat::test_that("timeless commitment's history holds the display-name vintages' gaps under the model's codes", {
+  fixture <- policy_timeless_fixture()
+  model <- policy_fixture_model(c("cr", "pi"), "eps_mp")
+  originals <- list(pi_gap_loss = "Inflation_gap_loss", cr = "Cash Rate")
+
+  vintages <- ezdyn_policy_vintages(fixture$vintages, "pi_gap_loss", "cr", TRUE, originals, model$M_)
+  history <- ezdyn_policy_history(
+    vintages, "pi_gap_loss", as.Date("2023-12-01"), as.Date("2024-03-01"), 3,
+    matrix(c(0.5, 0.5, 0.5), nrow = 1, dimnames = list("pi_gap_loss", NULL))
+  )
+
+  testthat::expect_true(all(c("pi_gap_loss", "cr") %in% names(vintages)))
+  # The 2023-12-01 vintage over 2023-12-01 to 2024-09-01, then the current
+  # (2024-03-01) baseline's gaps from its first quarter.
+  testthat::expect_equal(unname(history["pi_gap_loss", , 1]), c(1, 0.8, 0.6, 0.4))
+  testthat::expect_equal(unname(history["pi_gap_loss", 2:4, 2]), c(0.5, 0.5, 0.5))
+})
+
+testthat::test_that("timeless commitment names the vintage columns it is missing", {
+  fixture <- policy_timeless_fixture()
+  model <- policy_fixture_model(c("r_obs", "infl_obs"), "eps_r")
+  run <- function(strategy, vintages) {
+    get_policy_scenario(
+      strategy, fixture$baseline, model,
+      forecast_start = fixture$dates[[1]], forecast_end = fixture$dates[[4]],
+      loss_variable_vintages = vintages, preloss_start = as.Date("2023-12-01")
+    )
+  }
+
+  # A level column is not a gap column.
+  levels_only <- fixture$vintages
+  names(levels_only)[names(levels_only) == "Inflation_gap_loss"] <- "Inflation"
+  testthat::expect_error(run(fixture$strategy, levels_only), "`Inflation_gap_loss` (one `<loss variable>_gap_loss` column per loss variable", fixed = TRUE)
+  testthat::expect_error(run(fixture$strategy, NULL), "needs loss-variable vintages.*`Inflation_gap_loss`")
+
+  # The instrument's level is only needed for a historical (ELB) constraint.
+  no_rate <- fixture$vintages[setdiff(names(fixture$vintages), "Cash Rate")]
+  testthat::expect_no_error(run(fixture$strategy, no_rate))
+  elb <- fixture$strategy
+  elb$constraints <- list(list(direction = "lower", variable = "Cash Rate", period = 1:3, value = 0.1, historical = TRUE))
+  testthat::expect_error(run(elb, no_rate), "`Cash Rate` (the instrument's level", fixed = TRUE)
+  testthat::expect_no_error(run(elb, fixture$vintages))
+
+  short <- fixture$vintages[fixture$vintages$date <= as.Date("2024-03-01"), ]
+  testthat::expect_error(run(fixture$strategy, short), "vintage 2023-12-01 is incomplete: `Inflation_gap_loss` must cover every quarter from 2023-12-01 to 2024-09-01")
 })

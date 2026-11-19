@@ -43,6 +43,8 @@ testthat::test_that("Alternative Paths UI exposes configured controls and public
   testthat::expect_match(ui_html, "alt-models")
   testthat::expect_match(ui_html, "Model\\(s\\):")
   testthat::expect_match(ui_html, "alt-baseline_name")
+  # The active-baseline line sits at the end of the Advanced options.
+  testthat::expect_true(regexpr("alt-show_table", ui_html, fixed = TRUE) < regexpr("alt-active_baseline", ui_html, fixed = TRUE))
   testthat::expect_match(ui_html, "alt-cash_rate_sliders")
   testthat::expect_match(ui_html, "alt-open_upload")
   testthat::expect_match(ui_html, "alt-download_data")

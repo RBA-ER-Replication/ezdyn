@@ -131,6 +131,22 @@ optimal <- get_policy_scenario(
 plot_pretty(optimal, display_names = c("Cash rate", "Inflation", "Unemployment"))$graph
 ```
 
+Timeless commitment (`commit = "timeless"`) re-solves each quarter since
+`preloss_start` using the baseline as it looked at the time. Supply those past
+baselines as `loss_variable_vintages`: `vintage` and `date` columns plus one
+`<loss variable>_gap_loss` column per loss variable, each the variable's gap
+from its target at the time, e.g.
+
+| vintage | date | Inflation_gap_loss | Unemployment_gap_loss |
+|---|---|---|---|
+| 2025-12-01 | 2025-12-01 | 0.40 | 0.3 |
+| 2025-12-01 | 2026-03-01 | 0.35 | 0.3 |
+
+In a dashboard, the Optimal Policy tab offers the variables listed in
+`configure_dashboard(optimal_policy = list(loss_variable_choices = c("Inflation", "Unemployment"), constraint_variable_choices = "Cash Rate", loss_variable_vintages = vintages))`.
+Each choice is labelled with its own name; optionally, name an element to
+relabel it, e.g. `c("Unemployment gap" = "Unemployment")`.
+
 ## Historical shock decomposition
 
 `ez_hd()` converts a Dynare historical shock decomposition -- or a supplied
