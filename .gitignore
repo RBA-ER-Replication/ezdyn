@@ -2,4 +2,10 @@ dashboard_example/inputs/us_baseline.xlsx
 TODO.md
 dashboard_example/rsconnect/*
 .Rproj.user
+# Dashboard example: DSGE_mod clone (see dashboard_example/README.md) and
+# Dynare's output for the Smets-Wouters anticipated-shocks model
 dashboard_example/inputs/us_fred_raw.rds
+dashboard_example/DSGE_mod/
+dashboard_example/Smets_Wouters_2007_anticipated/+Smets_Wouters_2007_45_anticipated/
+dashboard_example/Smets_Wouters_2007_anticipated/Smets_Wouters_2007_45_anticipated/
+dashboard_example/Smets_Wouters_2007_anticipated/*.log

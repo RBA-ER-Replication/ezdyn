@@ -1,8 +1,9 @@
 # Build variable/shock/parameter metadata workbooks for all 8 models in this
 # dashboard: Smets-Wouters (2007) plus 7 curated Pfeifer DSGE_mod NK models
-# (see build_new_models.m / README.md for how the underlying Dynare JSON
-# model objects are built - this script reads inputs/SW_2007_45.json for SW's
-# parameter values, so build_new_models.m must be run first).
+# (see build_new_models.m, Smets_Wouters_2007_anticipated/build_sw_anticipated.m
+# and README.md for how the underlying Dynare JSON model objects are built -
+# this script reads inputs/SW_2007_45.json for SW's parameter values, so
+# build_sw_anticipated.m must be run first).
 #
 # Display names are shared ACROSS models wherever the underlying concept and
 # units genuinely match (e.g. "Nominal Interest Rate", "Inflation", "Hours
@@ -161,9 +162,10 @@ year_ended_inflation_row <- function(inflation) {
 
 # 0. Smets_Wouters_2007_45 ----------------------------------------------------
 # Descriptions are taken directly from the `long_name` annotations in
-# DSGE_mod/Smets_Wouters_2007/Smets_Wouters_2007_45.mod. Parameter values are
-# read back from the model JSON produced by build_new_models.m, so they
-# always match the actual calibration used by the exported MOO object (not
+# Smets_Wouters_2007_anticipated/Smets_Wouters_2007_45_anticipated.mod (the
+# same as DSGE_mod's Smets_Wouters_2007_45.mod). Parameter values are read back
+# from the model JSON produced by build_sw_anticipated.m, so they always match
+# the actual calibration used by the exported MOO object (not
 # hand-transcribed).
 sw_model_json <- fromJSON(readLines("inputs/SW_2007_45.json"), simplifyVector = TRUE)
 sw_param_names <- unlist(sw_model_json$M_$param_names)
@@ -205,6 +207,12 @@ sw_variables <- tribble(
 # `shock`/`description`/`is_measurement_error` is picked up automatically by
 # `ez_hd.available_shock_groupings()` and offered as a "Shock grouping:"
 # choice in the dashboard's Historical Shock Decomposition tab).
+#
+# The anticipated monetary policy shocks (`em_1`, `em_2`, ...) deliberately
+# have no rows here: ezdyn finds them by their codes for the policy
+# experiments, while leaving them out keeps them off the Impulse Response
+# Library's shock list. They have zero variance, so their smoothed values,
+# and their historical shock decomposition contributions, are zero.
 sw_shocks <- tribble(
   ~shock,   ~description,                            ~`Demand/Supply/Monetary`,
   "ea",     "Productivity shock",                     "Supply",

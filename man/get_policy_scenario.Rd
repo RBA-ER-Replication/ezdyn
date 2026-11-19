@@ -21,7 +21,9 @@ get_policy_scenario(
 \item{policy_strategy}{Named list with `output_name`, `output_variables`,
 `loss_variables`, `loss_weights`, `discount_factor`, `T_loss`,
 `T_instrument`, and `commit` (`"commit"`, `"timeless"`, or `"disc"`).
-Optional `instrument_variable` and `instrument_shock` identify the model's
+Discretion (`"disc"`) needs `T_loss >= T_instrument`: the policymaker
+re-optimises in each instrument period, against the loss from then to
+`T_loss`. Optional `instrument_variable` and `instrument_shock` identify the model's
 policy instrument and innovation. Variable entries (`output_variables`,
 `loss_variables`, `instrument_variable`, and constraint `variable`s) may
 be display names or dynare codes, resolved against `model`; a trailing

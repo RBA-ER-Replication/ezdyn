@@ -7,9 +7,11 @@
 # further down).
 #
 # Multi-model ezdyn dashboard combining the Smets-Wouters (2007) replication
-# model with 7 curated small-scale New Keynesian models from the Pfeifer
-# DSGE_mod collection (https://github.com/JohannesPfeifer/DSGE_mod, cloned
-# into DSGE_mod/ - see README.md for setup), each of which has an active
+# model (with anticipated monetary policy shocks, built from
+# Smets_Wouters_2007_anticipated/) with 7 curated small-scale New Keynesian
+# models from the Pfeifer DSGE_mod collection
+# (https://github.com/JohannesPfeifer/DSGE_mod, cloned into DSGE_mod/ - see
+# README.md for setup), each of which has an active
 # monetary policy shock suitable for impulse-response policy exercises. It
 # has no custom help content, HSD preamble, or baseline prepare/extend hooks -
 # everything else stays at ezdyn's generic defaults.
@@ -90,15 +92,21 @@ feedback_url <- paste0(ezdyn_github_url, "/issues/new")
 
 # Shown once when a session starts.
 usa_startup_modal <- shiny::modalDialog(
-  title = "ezdyn Dashboard (USA): beta",
-  shiny::p("This dashboard is a beta version of the ezdyn tool."),
+  title = "ezdyn Dashboard demo",
   shiny::p(
-    "The example code that loads models from Johannes Pfeifer's ",
-    shiny::a("DSGE_mod", href = "https://github.com/JohannesPfeifer/DSGE_mod", target = "_blank", .noWS = "outside"),
+    "This dashboard is an example of what can be built (easily!) using the ezdyn R package (",
+    shiny::a("see code", href = paste0(ezdyn_github_url, "/tree/main/dashboard_example"), target = "_blank", .noWS = "outside"),
+    ")."
+  ),
+  shiny::p("To create your own and learn more about what ezdyn can do, see ",
+           shiny::a("Sullivan and Ryan (2026)", href = "https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true", target = "_blank", .noWS = "outside"),
+           "."),
+  shiny::p(shiny::tags$b("Warning:"), " The example code that loads models from Johannes Pfeifer's ",
+    shiny::a("DSGE model library", href = "https://github.com/JohannesPfeifer/DSGE_mod", target = "_blank", .noWS = "outside"),
     " collection is experimental. Treat the results from those models as indicative only."
   ),
   shiny::p(
-    "Feedback is welcome: please ",
+    shiny::tags$b("Feedback is welcome:")," please ",
     shiny::a("raise an issue on GitHub", href = "https://github.com/RBA-ER-Replication/ezdyn/issues", target = "_blank", .noWS = "outside"),
     "."
   ),
@@ -272,6 +280,10 @@ usa_dashboard <- function() {
       defaults = list(models = c("Smets Wouters (2007)", "Gali NK (Ch.3)")),
       instrument_variable = "Nominal Interest Rate",
       instrument_shock = "Monetary policy shock",
+      # Let the "Anticipation Parameter" input use anticipated policy shocks
+      # (`em_1`, `em_2`, ...) in models that have them: Smets Wouters (2007).
+      # It defaults to 0 (surprise shocks); other models always use surprises.
+      use_cd = TRUE,
       forecast_end = timeline$data_end,
       preloss_start = min(vintages$vintage),
       loss_variable_vintages = vintages,

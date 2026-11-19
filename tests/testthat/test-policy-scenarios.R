@@ -267,6 +267,91 @@ testthat::test_that("discretionary policy implements time-varying lower bounds",
   testthat::expect_equal(shocks, c(1, 1), tolerance = 1e-6)
 })
 
+# Responses at t to a shock in period s, for a shock whose effect `irf`
+# doesn't depend on when it arrives.
+policy_test_shifted_irf <- function(irf, horizon, instruments) {
+  dY <- array(0, c(1, horizon, instruments), list("infl_obs", NULL, NULL))
+  for (s in seq_len(instruments)) {
+    periods <- s:horizon
+    dY[1, periods, s] <- irf[periods - s + 1]
+  }
+  dY
+}
+
+testthat::test_that("discretion allows a loss horizon longer than the instrument horizon", {
+  horizon <- 4L
+  instruments <- 2L
+  beta <- 0.9
+  Y0 <- c(1, 0.8, 0.5, 0.2)
+  dY <- policy_test_shifted_irf(c(1, 0.6, 0.3, 0.1), horizon, instruments)
+  no_constraints <- ezdyn_policy_discretion_constraints(list(), dY)
+
+  shocks <- ezdyn_policy_discretion(
+    Y0 = matrix(Y0, nrow = 1, dimnames = list("infl_obs", NULL)),
+    dY = dY, weights = 1, discount_factor = beta, constraints = no_constraints
+  )
+
+  # Brute-force backward induction: the period-2 policymaker minimises the
+  # loss over periods 2-4 given the first shock; the period-1 policymaker
+  # minimises the loss over periods 1-4, anticipating that reaction.
+  loss_from <- function(period, s) {
+    values <- Y0 + as.numeric(dY[1, , ] %*% s)
+    sum(beta^(seq_len(horizon - period + 1) - 1) * values[period:horizon]^2)
+  }
+  second <- function(s1) stats::optimize(function(s2) loss_from(2, c(s1, s2)), c(-50, 50), tol = 1e-12)$minimum
+  s1 <- stats::optimize(function(s1) loss_from(1, c(s1, second(s1))), c(-50, 50), tol = 1e-12)$minimum
+
+  testthat::expect_length(shocks, instruments)
+  testthat::expect_equal(shocks, c(s1, second(s1)), tolerance = 1e-5)
+})
+
+testthat::test_that("discretion with one instrument period matches commitment over a longer loss horizon", {
+  dY <- array(
+    c(1, 0.5, 0.6, 0.4, 0.3, 0.2),
+    dim = c(2, 3, 1),
+    dimnames = list(c("infl_obs", "y_obs"), NULL, NULL)
+  )
+  Y0 <- matrix(c(1, -0.5, 0.6, 0.2, 0.3, 0.1), nrow = 2, dimnames = list(c("infl_obs", "y_obs"), NULL))
+
+  discretion <- ezdyn_policy_discretion(Y0, dY, c(1, 0.5), 0.99, ezdyn_policy_discretion_constraints(list(), dY))
+  commitment <- ezdyn_policy_commit(Y0, dY, c(1, 0.5), 0.99, list(A_ineq = matrix(0, 0, 1), b_ineq = numeric()))
+
+  testthat::expect_equal(discretion, commitment, tolerance = 1e-8)
+})
+
+testthat::test_that("discretion explains why a loss horizon shorter than the instrument horizon is rejected", {
+  dY <- policy_test_shifted_irf(c(1, 0.5, 0.25), 3L, 3L)[, 1:2, , drop = FALSE]
+
+  testthat::expect_error(
+    ezdyn_policy_discretion(
+      Y0 = matrix(c(1, 1), nrow = 1, dimnames = list("infl_obs", NULL)),
+      dY = dY, weights = 1, discount_factor = 0.99,
+      constraints = ezdyn_policy_discretion_constraints(list(), dY)
+    ),
+    "loss horizon is 2 and the instrument horizon is 3.*quarters 3 to 3 would have no loss left to minimise"
+  )
+})
+
+testthat::test_that("get_policy_scenario() runs discretion with a longer loss horizon and rejects a shorter one", {
+  model <- load_dynare_irf_fixture()
+  dates <- seq(as.Date("2024-03-01"), by = "quarter", length.out = 4)
+  baseline <- data.frame(date = dates, r_obs = 4, infl_obs = 1)
+  strategy <- list(
+    output_name = "Discretion", output_variables = c("r_obs", "infl_obs"), loss_variables = "infl_obs",
+    loss_weights = 1, discount_factor = 0.99, T_loss = 4L, T_instrument = 2L, instrument_variable = "r_obs", commit = "disc"
+  )
+  run <- function(strategy) {
+    get_policy_scenario(strategy, baseline, model, forecast_start = dates[[1]], forecast_end = dates[[4]])
+  }
+
+  output <- run(strategy)
+  testthat::expect_setequal(unique(output$path_name), c("Baseline", "Discretion"))
+  testthat::expect_false(anyNA(output$value))
+
+  strategy$T_loss <- 1L
+  testthat::expect_error(run(strategy), "loss horizon is 1 and the instrument horizon is 2")
+})
+
 testthat::test_that("commitment constraints are respected and infeasible bounds error", {
   dY <- array(c(1, 0, 0, 1), dim = c(1, 2, 2), dimnames = list("r_obs", NULL, NULL))
   Y0 <- matrix(c(-1, -1), nrow = 1, dimnames = list("r_obs", NULL))
