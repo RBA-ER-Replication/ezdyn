@@ -124,31 +124,17 @@ dsgemoddash_steady_state_values <- function(model) {
   values
 }
 
-# Convert SW-coded data from model units to display units, using each
-# variable's scale factor (e.g. x 4 to annualise the quarterly `robs`).
-sw_display_units <- function(data, model) {
-  varmeta <- model$M_$varmeta
-  scale <- stats::setNames(unlist(varmeta$scale_factor), varmeta$dynare_name)
-  columns <- intersect(names(data), names(scale))
-  data[columns] <- Map(`*`, data[columns], scale[columns])
-  data
-}
-
 # Build the dashboard baseline: each metadata variable's own steady-state
 # level, flat over every supplied quarter, with the FRED/SEP baseline
-# (build_us_baseline.R) overwritten in for SW's seven observables. The
-# model-consistent (non-observable) variables, including "Output", have no
-# data counterpart, so they stay at steady state.
+# (build_us_baseline.R, already in display names and units) overwritten in
+# for SW's seven observables. The model-consistent (non-observable)
+# variables, including "Output", have no data counterpart, so they stay at
+# steady state.
 sw_build_baseline <- function(model, dates) {
   values <- dsgemoddash_steady_state_values(model)
   baseline <- tibble(date = dates, !!!as.list(values))
-
-  varmeta <- model$M_$varmeta
   us_data <- openxlsx2::read_xlsx(us_baseline_path, sheet = "baseline") |>
-    select(-any_of("unemployment")) |>
-    sw_display_units(model) |>
-    rename(any_of(stats::setNames(varmeta$dynare_name, varmeta$display_name)))
-
+    select(-any_of("Unemployment Rate"))
   dplyr::rows_update(baseline, us_data, by = "date")
 }
 
@@ -158,10 +144,10 @@ sw_build_baseline <- function(model, dates) {
 # the tab's unemployment target.
 us_add_unemployment <- function(baseline) {
   us_data <- openxlsx2::read_xlsx(us_baseline_path, sheet = "baseline")
-  if (!("Unemployment Rate" %in% names(baseline)) || !("unemployment" %in% names(us_data))) {
-    stop("The baseline and inputs/us_baseline.xlsx must both have the unemployment rate; re-run build_us_baseline.R.", call. = FALSE)
+  if (!("Unemployment Rate" %in% names(baseline)) || !("Unemployment Rate" %in% names(us_data))) {
+    stop("The baseline and inputs/us_baseline.xlsx must both have \"Unemployment Rate\"; re-run build_us_baseline.R.", call. = FALSE)
   }
-  rate <- us_data$unemployment[match(baseline$date, as.Date(us_data$date))]
+  rate <- us_data$`Unemployment Rate`[match(baseline$date, as.Date(us_data$date))]
   if (anyNA(rate)) stop("inputs/us_baseline.xlsx doesn't cover every baseline quarter's unemployment rate.", call. = FALSE)
   baseline[["Unemployment Rate"]] <- rate
   baseline
