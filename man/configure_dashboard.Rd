@@ -2,14 +2,21 @@
 % Please edit documentation in R/dash_configure_dashboard.R
 \name{configure_dashboard}
 \alias{configure_dashboard}
-\title{Create and validate a configuration for an ezdyn dashboard.}
+\title{Configure an ezdyn dashboard}
 \usage{
 configure_dashboard(
-  name = "ezdyn Dashboard",
   models,
   timeline,
   baselines,
   default_baseline,
+  hsd = list(),
+  optimal_policy = NULL,
+  alt_paths = list(),
+  irf = list(),
+  overview = list(),
+  startup_modal = NULL,
+  response_notes = NULL,
+  name = "ezdyn Dashboard",
   instrument_display_name = "Cash Rate",
   instrument_shock_name = "Monetary policy shock",
   r_slider_range = 3,
@@ -18,143 +25,521 @@ configure_dashboard(
   baseline_upload_source_models = names(models),
   default_baseline_upload_source_model = NULL,
   allow_display_name_upload = TRUE,
-  irf = list(),
-  overview = list(),
-  hsd = list(),
-  alt_paths = list(),
   dictionary = list(),
-  response_notes = NULL,
-  optimal_policy = NULL,
   help = list(),
-  startup_modal = NULL,
   header_links = NULL,
   plotters = "ggplot"
 )
 }
 \arguments{
-\item{name}{Dashboard title.}
+\item{models}{Named list of models, each from \code{\link[=read_dynare]{read_dynare()}} or
+\code{\link[=custom_moo]{custom_moo()}}; the names are the labels shown. See "What you must supply" below.}
 
-\item{models}{Named list of full Dynare or custom-MOO pairs.}
+\item{timeline}{List of quarterly dates \code{data_start}, \code{forecast_start},
+\code{forecast_end} and \code{data_end} (each the first day of a quarter's last
+month), and optionally \code{hsd_data_start}. See "What you must supply" below.}
 
-\item{timeline}{Named list containing quarterly Date values `data_start`,
-`data_end`, `forecast_start`, and `forecast_end`. Optionally also
-`hsd_data_start`, the calendar quarter that `t == 1` represents in the
-Historical Shock Decomposition tab (passed to `ez_hd()`'s `data_start`);
-defaults to `data_start` when omitted. Set it explicitly when a model's
-true smoothed-estimation-sample start differs from `data_start`.}
-
-\item{baselines}{Named list of canonical `ezdyn_baseline` objects.}
+\item{baselines}{Named list of baselines from \code{\link[=import_baseline]{import_baseline()}}, each
+covering \code{data_start} to \code{forecast_end}. See "What you must supply" below.}
 
 \item{default_baseline}{Name of the baseline selected initially.}
 
-\item{instrument_display_name}{Display name of the policy instrument.}
+\item{hsd}{Historical Shock Decompositions settings: a list with any of
+\code{models}, \code{display_names}, \code{shock_group} and \code{preamble_ui}. See
+"Historical Shock Decompositions" below.}
 
-\item{instrument_shock_name}{Display name or code of the instrument shock.}
+\item{optimal_policy}{Optimal Policy settings, or \code{NULL} (the default) for
+no Optimal Policy tab. A list that needs \code{forecast_end},
+\code{loss_variable_choices} and \code{constraint_variable_choices}, and usually
+\code{instrument_variable} and \code{instrument_shock}. See "Optimal Policy" below.}
 
-\item{r_slider_range}{Distance around a baseline level shown by each slider.}
+\item{alt_paths}{Alternative Policy Paths settings: a list with any of
+\code{models} and \code{defaults} (\code{models}, \code{display_names}, \code{lambda}). See
+"Alternative Policy Paths" below.}
 
-\item{r_slider_step}{Slider increment.}
+\item{irf}{Impulse Response Library settings: a list with any of
+\code{defaults} (\code{models}, \code{display_names}, \code{target_display_name}, \code{shock},
+\code{horizon}, \code{use_cd}, \code{lambda}) and \code{scenarios}. See "Impulse Response Library" below.}
 
-\item{cr_button_step}{Increment used by slider plus/minus controls.}
+\item{overview}{Overview tab content: a list with \code{html_path} (an HTML
+file) or \code{ui} (a function returning UI). No Overview tab by default.}
 
-\item{baseline_upload_source_models}{Configured model labels available for
-translating uploaded source-native baselines.}
+\item{startup_modal}{A \code{\link[shiny:modalDialog]{shiny::modalDialog()}} shown once when a session
+starts, or \code{NULL} (the default) for none.}
 
-\item{default_baseline_upload_source_model}{Initial source model for uploads.}
+\item{response_notes}{Chart footnotes for particular models and variables:
+a data frame with columns \code{model_name}, \code{note} and, optionally,
+\code{display_name} (\code{NA} or omitted applies the note whenever the model is
+plotted). Shown in the Impulse Response Library and Alternative Policy
+Paths tabs. \code{NULL} (the default) for none.}
 
-\item{allow_display_name_upload}{Whether users may declare an upload already
-uses canonical display-name columns.}
+\item{name}{Dashboard title.}
 
-\item{irf}{Curated Scenario Mode IRF data and defaults. Scenario data must
-include one scenario-group label per row in `scenario`; only the
-composition root that computes curated scenarios should build this data.
-Custom IRF targets always use displayed IRF units.}
+\item{instrument_display_name}{Display name of the policy rate in your
+models. See "Two settings to check" below.}
 
-\item{overview}{Overview HTML or UI callback configuration.}
+\item{instrument_shock_name}{Description (or code) of the monetary policy
+shock in your models. See "Two settings to check" below.}
 
-\item{hsd}{Historical shock-decomposition configuration. `hsd$preamble_ui`
-is an optional function returning UI shown above the HSD chart; `NULL`
-(the default) shows no preamble.}
+\item{r_slider_range}{Alternative Policy Paths sliders' range either side
+of the baseline, in the policy rate's units.}
 
-\item{alt_paths}{Alternative Policy Paths model-selection configuration.
-`alt_paths$models` is the eligible model allow-list offered by the tab's
-model selector (defaults to every configured model); `alt_paths$defaults$models`
-is the selector's initial selection (defaults to every eligible model).
-`alt_paths$defaults$display_names` sets the initially plotted response
-variables (defaults to `irf$defaults$display_names`), and
-`alt_paths$defaults$lambda` the initial cognitive-discounting
-(anticipation) parameter (defaults to 0.8).}
+\item{r_slider_step}{Alternative Policy Paths sliders' step.}
 
-\item{dictionary}{Variable Dictionary model-selection configuration.
-`dictionary$models` is the eligible model allow-list offered by the tab's
-model selector (defaults to every configured model); `dictionary$defaults$models`
-is the selector's initial selection (defaults to every eligible model).}
+\item{cr_button_step}{Step of the sliders' plus/minus buttons.}
 
-\item{response_notes}{Optional data frame of reviewed footnote caveats shown
-in the IRF Library and Alternative Policy Paths tabs, with columns
-`model_name` (a configured model label), `note` (the footnote text), and
-optionally `display_name` (a response variable's display name; `NA` or
-omitted applies the note whenever that model appears at all). `NULL`
-(the default) shows no response-note footnotes.}
+\item{baseline_upload_source_models}{Models users can choose to translate
+an uploaded baseline written in model codes (default: all).}
 
-\item{optimal_policy}{Optional policy-module configuration. When enabled,
-supplies model roles, a separate policy horizon, explicit instrument codes,
-baseline preparation/extension functions, the variables the tab offers,
-timeless-policy vintages, and optional composition-supplied UI hooks.
-`loss_variable_choices` and `constraint_variable_choices` are character
-vectors of the variables offered as loss-function variables and as
-constraint (bound) variables, e.g. `c("Inflation", "Output")`. Use
-display names so one list works across models; dynare codes also work.
-The tab labels each choice with its value. Optionally, name an element to
-give it a different label, e.g. `c("Output gap" = "Output", "Inflation")`.
-`loss_variable_vintages` (optional) makes the tab's Commitment strategy
-timeless commitment, re-solved from a past commitment start; without it,
-Commitment is ordinary commitment from the forecast start and the tab has
-no commitment-start control. It is a data frame of past baselines: `vintage` and
-`date` columns plus one `<loss variable>_gap_loss` column per loss
-variable, named by the variable's value in `loss_variable_choices`
-(e.g. `Inflation_gap_loss`), holding its gap from the target as it stood
-at the time, in baseline units. The ELB option also needs the
-instrument's level, in a column named like `instrument_variable`. See
-[get_policy_scenario()] for the full format. UI hooks: `help` (named list of modal-
-returning functions keyed by `cd`, `strategy`, `loss_variables`,
-`loss_horizon`, `instrument_horizon`, `constraints`, `commitment_start`;
-missing keys show a generic fallback modal), `description_ui` (function
-returning the tab's introductory UI; a generic placeholder is used when
-unset), `loss_variable_defaults` (named numeric target defaults), and
-`loss_variable_weight_defaults` (named numeric weight defaults; unlisted
-loss variables default to a weight of 1).}
+\item{default_baseline_upload_source_model}{The model initially chosen for
+that (default: the first).}
 
-\item{help}{Optional top-level contextual-help configuration used outside
-the Optimal Policy tab. `help$anticipated_shocks` is an optional function
-returning UI from [shiny::modalDialog()] for Alternative Policy Paths'
-anticipated-shock and cognitive-discounting help buttons; a generic
-fallback modal is shown when unset.}
+\item{allow_display_name_upload}{Whether users can upload a baseline
+already in display names and units (default \code{TRUE}).}
 
-\item{startup_modal}{Optional UI returned by [shiny::modalDialog()] to show
-once when a session starts.}
+\item{dictionary}{Variable Dictionary settings: a list with \code{models} and
+\code{defaults$models}. The tab isn't shown at present.}
 
-\item{header_links}{Optional named character vector of links shown as
-buttons under the dashboard title, e.g.
-`c("Read the whitepaper" = "https://...")`. Names are the
-button labels, and each button opens its link in a new browser tab. `NULL` (the
-default) shows no links.}
+\item{help}{Help for Alternative Policy Paths: a list with
+\code{anticipated_shocks}, a function returning a \code{\link[shiny:modalDialog]{shiny::modalDialog()}}. A
+generic message is shown by default. (Optimal Policy's help is set in
+\code{optimal_policy$help}.)}
 
-\item{plotters}{Character vector naming the plotting backends this
-dashboard offers, from `c("ggrba", "ggplot")`. Explicit and static - not
-detected from installed packages - so a deployment controls exactly
-which backends are offered regardless of what happens to be installed
-on the server. The "Plot style" control is shown only when more than one
-backend is configured; `"ggrba"` is preselected when both are available.
-Defaults to `"ggplot"` only, so the dashboard - and `ezdyn` generally -
-keeps working without the optional, internal-only `ggrba` package in a
-more public context. Supply `c("ggrba", "ggplot")` for a deployment that
-should also offer RBA-styled charts.}
+\item{header_links}{Buttons under the title linking to web pages: a named
+character vector of URLs, named by button label, e.g.
+\code{c("Read the paper" = "https://...")}. \code{NULL} (the default) for none.}
+
+\item{plotters}{Plotting styles offered, from \code{"ggplot"} (the default)
+and \code{"ggrba"}. The style control is shown only when there are both;
+\code{"ggrba"} needs the internal \code{ggrba} package.}
 }
 \value{
-An object of class `ezdyn_dashboard_config`.
+An \code{ezdyn_dashboard_config} object, to pass to
+\code{\link[=ezdyn_dashboard]{ezdyn_dashboard()}}.
 }
 \description{
-This constructor only validates supplied objects. It does not read files,
-load models, build baselines, or start a Shiny app.
+\code{configure_dashboard()} gathers everything an ezdyn dashboard needs - the
+models, the dates, the baseline forecasts and each tab's settings - into one
+checked configuration. Pass the result to \code{\link[=ezdyn_dashboard]{ezdyn_dashboard()}} to build the
+Shiny app.
+
+It only checks what you give it: it doesn't read files, load models, build
+baselines or start the app. Load the models with \code{\link[=read_dynare]{read_dynare()}} or
+\code{\link[=custom_moo]{custom_moo()}} and build each baseline with \code{\link[=import_baseline]{import_baseline()}} first.
+
+Only the first four arguments are required. Every other argument has a
+default that gives a working dashboard: the tab settings come next, then
+optional extras. The one exception to "the later, the less likely you need
+it" is the pair of instrument settings, which must match your models'
+names. The sections below walk through them:
+\enumerate{
+\item \strong{What you must supply}: \code{models}, \code{timeline}, \code{baselines},
+\code{default_baseline}.
+\item \strong{The tabs}: which tabs the dashboard shows, and which argument
+controls each.
+\item \strong{Two settings to check}: \code{instrument_display_name} and
+\code{instrument_shock_name}, which must match your models.
+\item \strong{The tab settings}: \code{hsd}, \code{optimal_policy}, \code{alt_paths} and \code{irf},
+each a list of options, with their own sections below.
+\item \strong{Optional extras}: everything else, which you can ignore when setting
+up a dashboard.
+}
+
+A complete, working example is the USA dashboard in the package
+repository's \code{dashboard_example/usa_dashboard.R}.
+}
+\section{What you must supply}{
+
+\itemize{
+\item \strong{\code{models}}: a named list of models, each loaded with \code{\link[=read_dynare]{read_dynare()}}
+(a solved Dynare model) or \code{\link[=custom_moo]{custom_moo()}} (impulse responses from any
+other source, e.g. a VAR). The names are the labels the dashboard shows,
+e.g. \code{list("Smets Wouters (2007)" = sw, "My VAR" = var)}. Give each
+model a \code{colour} when you load it, so its lines are easy to tell apart.
+\item \strong{\code{timeline}}: a list of four dates, each the first day of a quarter's
+last month (March, June, September or December, e.g.
+\code{as.Date("2026-09-01")} for 2026Q3):
+\itemize{
+\item \code{data_start}: the first quarter of history shown;
+\item \code{forecast_start}: the first forecast quarter;
+\item \code{forecast_end}: the last forecast quarter. Alternative Policy Paths
+gives the user one slider per quarter from \code{forecast_start} to here,
+so 8 to 12 quarters is typical;
+\item \code{data_end}: the last quarter of the baseline. It can run past
+\code{forecast_end}, e.g. to give Optimal Policy a longer horizon.
+}
+
+They must satisfy \verb{data_start <= forecast_start <= forecast_end <= data_end}. An optional fifth date, \code{hsd_data_start}, is only needed if
+your models' historical shock decompositions start at a different
+quarter from \code{data_start}.
+\item \strong{\code{baselines}}: a named list of one or more baseline forecasts, each
+built with \code{\link[=import_baseline]{import_baseline()}}, so its columns are display names in the
+dashboard's units. Each must cover every quarter from \code{data_start} to
+\code{forecast_end}. Users choose between them, and can upload more, in the
+app.
+\item \strong{\code{default_baseline}}: the name of the baseline selected when the
+dashboard opens.
+}
+
+One more requirement: at least one model must have a historical shock
+decomposition (an estimated Dynare model, with smoothed shocks and
+variables), because the Historical Shock Decomposition tab is always shown.
+}
+
+\section{The tabs}{
+\tabular{lll}{
+   Tab \tab Shown \tab Configured by \cr
+   Overview \tab Only if \code{overview} supplies content \tab \code{overview} \cr
+   Alternative Policy Paths \tab Always \tab \code{alt_paths}, the instrument settings \cr
+   Impulse Response Library \tab Always \tab \code{irf} \cr
+   Historical Shock Decompositions \tab Always (needs one model with a decomposition) \tab \code{hsd} \cr
+   Optimal Policy \tab Only if \code{optimal_policy} is supplied \tab \code{optimal_policy} \cr
+}
+
+
+Every tab works with its defaults, except Optimal Policy, which needs a
+few settings of its own (see "Optimal Policy" below).
+
+Throughout, variables are referred to by their \strong{display names}, the
+\code{display_name} column of each model's metadata (e.g. "Inflation"), not
+their model codes (e.g. \code{pinfobs}). Display names are what let one setting
+apply to several models whose codes differ. A tab only offers a variable
+that every selected model has.
+}
+
+\section{Two settings to check}{
+
+
+Alternative Policy Paths moves the policy interest rate, and needs to know
+which variable and shock that is in your models:
+\itemize{
+\item \code{instrument_display_name} (default \code{"Cash Rate"}): the display name of
+the policy rate.
+\item \code{instrument_shock_name} (default \code{"Monetary policy shock"}): the
+description (or code) of the monetary policy shock.
+}
+
+Set them if your models' metadata name these differently, e.g.
+\code{instrument_display_name = "Nominal Interest Rate"}. They are the only
+settings outside the required four that a new dashboard is likely to need.
+\code{name} sets the title shown at the top of the dashboard.
+}
+
+\section{Historical Shock Decompositions (\code{hsd})}{
+
+
+The tab shows how each model attributes history to its shocks. Settings,
+all optional:
+\itemize{
+\item \code{models}: the models offered. Defaults to every model; models without a
+historical shock decomposition are dropped automatically.
+\item \code{display_names}: the variables selected when the tab opens (default
+none).
+\item \code{shock_group}: the shock grouping selected when the tab opens. A grouping
+is any extra column of a model's shock metadata (e.g.
+"Demand/Supply/Monetary"), which adds up the contributions of the shocks
+in each group. \code{NULL} (the default) shows each shock separately.
+\item \code{preamble_ui}: a function returning UI shown above the chart, e.g. a
+short explanation.
+}
+}
+
+\section{Alternative Policy Paths (\code{alt_paths})}{
+
+
+The user sets a path for the policy rate, one slider per forecast quarter,
+and the tab shows each model's response: the policy shocks that would
+deliver that path, and their effects on the other variables. Optionally,
+it uses anticipated (announced) shocks, for models that have them, with a
+"cognitive discounting" parameter that sets how far ahead people look.
+Settings, all optional:
+\itemize{
+\item \code{models}: the models offered (default: all).
+\item \code{defaults$models}: the models selected when the tab opens (default: all
+offered models).
+\item \code{defaults$display_names}: the variables plotted when the tab opens.
+Defaults to \code{irf$defaults$display_names}.
+\item \code{defaults$lambda}: the initial cognitive discounting parameter, between
+0 and 1 (default 0.8).
+}
+
+The sliders themselves are set by \code{instrument_display_name} and, rarely,
+\code{r_slider_range}, \code{r_slider_step} and \code{cr_button_step} (see "Optional extras" below).
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{alt_paths = list(defaults = list(
+  models = "Smets Wouters (2007)",
+  display_names = c("Inflation (year-ended)", "Nominal Interest Rate"),
+  lambda = 0.8
+))
+}\if{html}{\out{</div>}}
+}
+
+\section{Impulse Response Library (\code{irf})}{
+
+
+The tab shows the models' impulse responses, in up to three modes:
+\itemize{
+\item \strong{Custom IRF}: a chosen shock, scaled so that a chosen "target"
+variable moves by a chosen amount in the first quarter (e.g. a shock
+that raises the policy rate by 1 percentage point). Comparing models this
+way puts them on a like-for-like footing.
+\item \strong{Custom IRF (raw shocks)}: a one-unit shock, unscaled.
+\item \strong{Default (Pre-prepared scenarios)}: responses you computed in advance
+and supply in \code{irf$scenarios}. This mode appears only if you do.
+}
+
+Settings, all optional, in \code{irf$defaults}:
+\itemize{
+\item \code{models}: the models selected when the tab opens (default: all).
+\item \code{display_names}: the variables plotted when the tab opens. The default,
+"Trimmed Mean Inflation (ye)", suits RBA models only, so set this to
+variables your models have. Alternative Policy Paths uses it too, unless
+\code{alt_paths$defaults$display_names} is set.
+\item \code{target_display_name}: Custom IRF's initial target variable. Defaults to
+the first of \code{display_names} that can be targeted.
+\item \code{shock}: the description of the shock selected when the tab opens.
+\item \code{horizon}: the number of quarters shown (default 40).
+\item \code{use_cd}, \code{lambda}: whether Custom IRF starts with cognitive discounting
+on (default \code{FALSE}), and its initial parameter (default 0).
+}
+
+\code{irf$scenarios} is a data frame of pre-computed responses with columns
+\code{scenario} (the scenario's label), \code{t}, \code{shock}, \code{dynare_name},
+\code{display_name}, \code{display_unit}, \code{value}, \code{model_name} (a configured model
+label) and, optionally, \code{footnote}.
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{irf = list(defaults = list(
+  display_names = c("Nominal Interest Rate", "Inflation"),
+  horizon = 20
+))
+}\if{html}{\out{</div>}}
+}
+
+\section{Optimal Policy (\code{optimal_policy})}{
+
+
+The tab finds the policy rate path that minimises a loss function: the
+weighted sum of squared gaps between chosen variables and their targets.
+The user picks the loss variables, their weights and targets, the
+strategy (commitment or discretion), the horizons, and any bounds on
+variables (including an effective lower bound on the rate). The tab is
+only shown if you supply \code{optimal_policy}, and it then needs:
+\itemize{
+\item \code{forecast_end} (required): the last quarter of the policy horizon, at or
+after \code{timeline$forecast_start}. Often the end of the baseline
+(\code{timeline$data_end}). Every baseline must cover every quarter up to
+here, or be extended to it by \code{extend_baseline} (see "Advanced" below).
+\item \code{loss_variable_choices} (required): the variables offered for the loss
+function, as a character vector of display names, e.g.
+\code{c("Inflation", "Output Growth")}. Each is labelled with its own name; to
+relabel one, name it, e.g. \code{c("Output gap" = "Output")}.
+\item \code{constraint_variable_choices} (required): the variables that can be
+given upper or lower bounds, in the same form.
+\item \code{instrument_variable} and \code{instrument_shock}: the policy rate and
+monetary policy shock, as display names or codes. Their defaults
+(\code{"r_obs"} and \code{"eps_r"}) only suit RBA models, so set them, usually to
+the same values as \code{instrument_display_name} and
+\code{instrument_shock_name}.
+}
+
+Worth setting for a good first view, all optional:
+\itemize{
+\item \code{defaults$models}: the models selected when the tab opens (default: all
+offered). \code{models} is the list offered (default: all).
+\item \code{default_response_variables}: the variables plotted when the tab opens.
+\item \code{default_loss_variables}: the loss variables selected when the tab opens.
+\item \code{loss_variable_defaults}: initial targets, as a named numeric vector,
+e.g. \code{c("Inflation" = 0.5)}. Unlisted variables start at 0.
+\item \code{loss_variable_weight_defaults}: initial weights, in the same form.
+Unlisted variables start at 1.
+\item \code{use_cd} and \code{lambda}: whether the tab offers anticipated policy shocks
+(for models that have them), and the initial anticipation parameter.
+Without anticipated shocks, commitment and discretion give the same path.
+}
+
+Timeless commitment, optional:
+\itemize{
+\item \code{loss_variable_vintages}: past baselines, so that "Commitment" assumes
+policy was committed to in some past quarter and re-solved each quarter
+since, using the baseline of the time. Without them, Commitment is
+ordinary commitment from the forecast start. It's a data frame with
+\code{vintage} and \code{date} columns and one \verb{<loss variable>_gap_loss} column per
+loss variable (e.g. \code{Inflation_gap_loss}): the gap from the target as it
+stood at the time. See \code{\link[=get_policy_scenario]{get_policy_scenario()}} for the full format.
+\item \code{preloss_start}: the earliest commitment start the user can choose,
+usually the first vintage (default \code{timeline$forecast_start}).
+}
+
+Advanced, rarely needed:
+\itemize{
+\item \code{baseline_model}: the model whose metadata names the baseline's
+variables (default: the first of \code{models}).
+\item \code{prepare_baseline(baseline, model, policy_config)} and
+\code{extend_baseline(baseline, policy_config)}: functions that adjust or
+extend the selected baseline before the calculation, e.g. to extend it to
+\code{forecast_end}. Both default to leaving it unchanged.
+\item \code{elb_variable}: the variable the "ELB" option bounds (default
+\code{instrument_variable}).
+\item \code{description_ui}: a function returning the tab's introductory UI.
+\item \code{help}: a named list of functions, each returning a
+\code{\link[shiny:modalDialog]{shiny::modalDialog()}}, for the tab's help buttons: \code{cd}, \code{strategy},
+\code{loss_variables}, \code{loss_horizon}, \code{instrument_horizon}, \code{constraints} and
+\code{commitment_start}. Missing ones show a generic message.
+\item \code{enabled = FALSE}: hides the tab while keeping its settings.
+}
+
+\if{html}{\out{<div class="sourceCode r">}}\preformatted{optimal_policy = list(
+  forecast_end = timeline$data_end,
+  instrument_variable = "Nominal Interest Rate",
+  instrument_shock = "Monetary policy shock",
+  loss_variable_choices = c("Inflation", "Output Growth", "Nominal Interest Rate Changes"),
+  constraint_variable_choices = c("Nominal Interest Rate", "Inflation"),
+  default_response_variables = c("Inflation", "Output Growth", "Nominal Interest Rate"),
+  default_loss_variables = c("Inflation", "Output Growth"),
+  loss_variable_defaults = c("Inflation" = 0.5)
+)
+}\if{html}{\out{</div>}}
+}
+
+\section{Optional extras}{
+
+
+You can leave all of these at their defaults when setting up a dashboard.
+\itemize{
+\item \code{overview}: an Overview tab, shown first, from either \code{html_path} (an
+HTML file) or \code{ui} (a function returning Shiny UI).
+\item \code{startup_modal}: a \code{\link[shiny:modalDialog]{shiny::modalDialog()}} shown when a session starts,
+e.g. a disclaimer.
+\item \code{response_notes}: footnotes added to charts whenever a given model (and,
+optionally, a given variable) is plotted, e.g. to flag a caveat. A data
+frame with columns \code{model_name}, \code{note} and, optionally, \code{display_name}.
+\item \code{header_links}: buttons under the title linking to web pages, as a named
+character vector of URLs named by button label.
+\item \code{r_slider_range}, \code{r_slider_step}, \code{cr_button_step}: the Alternative
+Policy Paths sliders' range either side of the baseline, step, and the
+step of their plus/minus buttons, in the policy rate's units.
+\item \code{baseline_upload_source_models}, \code{default_baseline_upload_source_model},
+\code{allow_display_name_upload}: which models users can choose to translate
+an uploaded baseline written in model codes, and whether they can upload
+one already in display names.
+\item \code{help}: \code{help$anticipated_shocks}, a function returning a
+\code{\link[shiny:modalDialog]{shiny::modalDialog()}} for Alternative Policy Paths' help buttons.
+\item \code{plotters}: the plotting styles offered, from \code{"ggplot"} (the default)
+and \code{"ggrba"} (RBA style, which needs the internal \code{ggrba} package).
+\item \code{dictionary}: settings for a Variable Dictionary tab, which isn't shown
+at present.
+}
+}
+
+\examples{
+\dontrun{
+# 1. A minimal dashboard: one estimated model and one baseline -----------
+sw <- read_dynare(
+  path = "inputs/SW_2007_45.json",
+  path_meta = "inputs/variable_metadata.xlsx",
+  model_name = "Smets Wouters (2007)",
+  colour = "forestgreen"
+)
+models <- list("Smets Wouters (2007)" = sw)
+baseline <- import_baseline("inputs/baseline.xlsx", source_model = sw, models = models)
+timeline <- list(
+  data_start = as.Date("2010-03-01"),
+  forecast_start = as.Date("2026-09-01"),
+  forecast_end = as.Date("2028-12-01"),
+  data_end = as.Date("2028-12-01")
+)
+
+config <- configure_dashboard(
+  models = models,
+  timeline = timeline,
+  baselines = list("Baseline forecast" = baseline),
+  default_baseline = "Baseline forecast",
+  # Match the models' names for the policy rate and its shock (see "Two settings to check")
+  instrument_display_name = "Nominal Interest Rate",
+  instrument_shock_name = "Monetary policy shock"
+)
+shiny::runApp(ezdyn_dashboard(config))
+
+# 2. Several models, with tab defaults set --------------------------------
+var <- custom_moo(
+  irf = read.csv("inputs/var_irfs.csv"),
+  model_name = "My VAR",
+  meta = "inputs/var_metadata.xlsx",
+  colour = "firebrick"
+)
+models <- list("Smets Wouters (2007)" = sw, "My VAR" = var)
+plotted <- c("Inflation (year-ended)", "Output Growth (year-ended)", "Nominal Interest Rate")
+
+config <- configure_dashboard(
+  models = models,
+  timeline = timeline,
+  baselines = list("Baseline forecast" = baseline),
+  default_baseline = "Baseline forecast",
+  hsd = list(display_names = "Inflation", shock_group = "Demand/Supply/Monetary"),
+  alt_paths = list(defaults = list(models = "Smets Wouters (2007)", display_names = plotted)),
+  irf = list(defaults = list(display_names = c("Nominal Interest Rate", "Inflation"), horizon = 20)),
+  name = "My Dashboard",
+  instrument_display_name = "Nominal Interest Rate",
+  instrument_shock_name = "Monetary policy shock"
+)
+
+# 3. Adding the Optimal Policy tab -----------------------------------------
+# The baseline must run to `optimal_policy$forecast_end`, so here it (and
+# `data_end`) runs ten years past the Alternative Paths window.
+timeline$data_end <- as.Date("2038-06-01")
+# Optional past baselines for timeless commitment (see "Optimal Policy" below), e.g.
+# as built by the package repository's dashboard_example/build_us_baseline.R
+vintages <- readxl::read_excel("inputs/us_vintages.xlsx", sheet = "vintages")
+
+config <- configure_dashboard(
+  models = models,
+  timeline = timeline,
+  baselines = list("Baseline forecast" = baseline),
+  default_baseline = "Baseline forecast",
+  optimal_policy = list(
+    forecast_end = timeline$data_end,
+    instrument_variable = "Nominal Interest Rate",
+    instrument_shock = "Monetary policy shock",
+    loss_variable_choices = c("Inflation", "Output Growth", "Nominal Interest Rate Changes"),
+    constraint_variable_choices = c("Nominal Interest Rate", "Inflation"),
+    default_response_variables = plotted,
+    default_loss_variables = c("Inflation", "Output Growth"),
+    # Targets in the variables' units: 2\% a year inflation is 0.5 a quarter
+    loss_variable_defaults = c("Inflation" = 0.5, "Output Growth" = 0.45),
+    # Offer anticipated policy shocks, for models that have them
+    use_cd = TRUE,
+    lambda = 0.8,
+    # Optional: past baselines, for timeless commitment
+    loss_variable_vintages = vintages,
+    preloss_start = min(vintages$vintage)
+  ),
+  instrument_display_name = "Nominal Interest Rate",
+  instrument_shock_name = "Monetary policy shock"
+)
+
+# 4. Optional extras ----------------------------------------------------------
+config <- configure_dashboard(
+  models = models,
+  timeline = timeline,
+  baselines = list("Baseline forecast" = baseline),
+  default_baseline = "Baseline forecast",
+  overview = list(html_path = "overview.html"),
+  startup_modal = shiny::modalDialog(title = "Welcome", "Results are indicative only."),
+  response_notes = data.frame(
+    model_name = "My VAR",
+    display_name = NA,
+    note = "Estimated over 1990-2019."
+  ),
+  header_links = c("Read the paper" = "https://example.com/paper.pdf"),
+  instrument_display_name = "Nominal Interest Rate",
+  instrument_shock_name = "Monetary policy shock"
+)
+}
+
+}
+\seealso{
+\code{\link[=ezdyn_dashboard]{ezdyn_dashboard()}} to build the app; \code{\link[=read_dynare]{read_dynare()}},
+\code{\link[=custom_moo]{custom_moo()}} and \code{\link[=import_baseline]{import_baseline()}} to prepare its inputs;
+\code{\link[=get_policy_scenario]{get_policy_scenario()}} for Optimal Policy's calculation and vintage
+format.
 }
