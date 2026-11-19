@@ -130,8 +130,18 @@ optimal_policy_constraint_table <- function(ns, policy_dates, config) {
 optimal_policy_strategies <- function(input, constraints, config) {
   modes <- c("commit", "timeless", "disc")
   modes <- modes[modes %in% input$strategy_modes]
-  if ("disc" %in% modes && input$loss_horizon != input$instrument_horizon) {
-    stop("Discretion requires equal loss and optimisation horizons.", call. = FALSE)
+  # Discretion allows a longer loss horizon, but not a shorter one: a
+  # policymaker after the loss horizon would have nothing to minimise.
+  if ("disc" %in% modes && input$loss_horizon < input$instrument_horizon) {
+    stop(sprintf(
+      paste(
+        "Discretion needs a loss evaluation horizon at least as long as the optimisation horizon",
+        "(currently %d and %d quarters). Under discretion policy is re-set each quarter to minimise",
+        "the loss from that quarter on, so there is nothing to minimise after the loss evaluation",
+        "horizon. Lengthen the loss evaluation horizon or shorten the optimisation horizon."
+      ),
+      as.integer(input$loss_horizon), as.integer(input$instrument_horizon)
+    ), call. = FALSE)
   }
   lapply(modes, function(mode) {
     list(
@@ -517,8 +527,15 @@ ServerTab_OptimalPolicy <- function(id, config) {
       loss_variables <- input$loss_variables
       targets <- stats::setNames(vapply(loss_variables, function(variable) input[[paste0("target_", optimal_policy_widget_id(variable))]], numeric(1)), loss_variables)
       baseline <- optimal_policy_add_gaps(prepared_baseline(), loss_variables, targets, baseline_model)
-      constraints <- optimal_policy_constraints(input, config)
-      strategies <- optimal_policy_strategies(input, constraints, config)
+      # Invalid inputs (e.g. discretion with a loss horizon shorter than the
+      # optimisation horizon) are shown as a validation message, which Shiny
+      # never sanitises, rather than as an error.
+      strategies <- tryCatch(
+        optimal_policy_strategies(input, optimal_policy_constraints(input, config), config),
+        error = function(e) e
+      )
+      invalid <- inherits(strategies, "error")
+      shiny::validate(shiny::need(!invalid, if (invalid) conditionMessage(strategies)))
       # Warnings raised by the calculation (e.g. a model with too few
       # anticipated shocks) are shown above the graph rather than only on the
       # R console.

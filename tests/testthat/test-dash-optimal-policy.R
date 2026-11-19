@@ -125,6 +125,34 @@ testthat::test_that("Optimal Policy maps the Commitment control to timeless comm
   testthat::expect_identical(vapply(actual, `[[`, character(1), "instrument_shock"), c("eps_r", "eps_r"))
 })
 
+testthat::test_that("Optimal Policy allows discretion with a longer loss horizon but not a shorter one", {
+  input <- list(
+    strategy_modes = "disc",
+    loss_horizon = 8L,
+    instrument_horizon = 4L,
+    response_variables = "r_obs",
+    loss_variables = "infl_obs",
+    weight_infl_obs = 1,
+    discount_factor = 0.99
+  )
+  config <- list(optimal_policy = list(instrument_variable = "r_obs", instrument_shock = "eps_r"))
+
+  actual <- optimal_policy_strategies(input, list(), config)
+  testthat::expect_identical(actual[[1]]$T_loss, 8L)
+  testthat::expect_identical(actual[[1]]$T_instrument, 4L)
+
+  input$loss_horizon <- 2L
+  testthat::expect_error(
+    optimal_policy_strategies(input, list(), config),
+    "loss evaluation horizon at least as long as the optimisation horizon \\(currently 2 and 4 quarters\\)"
+  )
+
+  # Commitment keeps accepting a shorter loss horizon: with anticipated
+  # shocks, later instruments still move the loss through expectations.
+  input$strategy_modes <- "timeless"
+  testthat::expect_length(optimal_policy_strategies(input, list(), config), 1)
+})
+
 testthat::test_that("Optimal Policy uses the shared two-year plot-range convention", {
   timeline <- list(data_start = as.Date("2024-03-01"), forecast_start = as.Date("2026-09-01"))
 
