@@ -263,8 +263,9 @@ testthat::test_that("configure_dashboard validates explicit optimal-policy setti
     default_baseline = "Staff"
   )
   policy_config <- list(
-    policy_model = "DINGO",
-    comparison_model = "MARTIN",
+    models = c("DINGO", "MARTIN"),
+    defaults = list(models = "MARTIN"),
+    baseline_model = "MARTIN",
     forecast_end = as.Date("2024-12-01"),
     preloss_start = as.Date("2023-12-01"),
     instrument_variable = "r_obs",
@@ -277,12 +278,30 @@ testthat::test_that("configure_dashboard validates explicit optimal-policy setti
 
   config <- do.call(configure_dashboard, c(arguments, list(optimal_policy = policy_config)))
   testthat::expect_true(config$optimal_policy$enabled)
-  testthat::expect_equal(config$optimal_policy$comparison_model, "MARTIN")
+  testthat::expect_equal(config$optimal_policy$models, c("DINGO", "MARTIN"))
+  testthat::expect_equal(config$optimal_policy$defaults$models, "MARTIN")
+  testthat::expect_equal(config$optimal_policy$baseline_model, "MARTIN")
   testthat::expect_equal(config$optimal_policy$forecast_end, as.Date("2024-12-01"))
+  testthat::expect_true(config$optimal_policy$use_cd)
+  testthat::expect_equal(config$optimal_policy$lambda, 0.8)
+
+  # Models and the baseline model default to every model and the first model.
+  default_config <- do.call(configure_dashboard, c(arguments, list(
+    optimal_policy = policy_config[setdiff(names(policy_config), c("models", "defaults", "baseline_model"))]
+  )))
+  testthat::expect_equal(default_config$optimal_policy$models, c("DINGO", "MARTIN"))
+  testthat::expect_equal(default_config$optimal_policy$defaults$models, c("DINGO", "MARTIN"))
+  testthat::expect_equal(default_config$optimal_policy$baseline_model, "DINGO")
+
   testthat::expect_false(dashboard_test_config()$optimal_policy$enabled)
   testthat::expect_error(
     do.call(configure_dashboard, c(arguments, list(optimal_policy = list(forecast_end = as.Date("2024-05-01"))))),
     "optimal_policy"
+  )
+  # The baseline model must be one of the Optimal Policy models.
+  testthat::expect_error(
+    do.call(configure_dashboard, c(arguments, list(optimal_policy = utils::modifyList(policy_config, list(models = "DINGO", defaults = list(models = "DINGO")))))),
+    "baseline_model"
   )
 })
 

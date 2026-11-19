@@ -89,15 +89,19 @@ testthat::test_that("Optimal Policy rejects bounds outside its loss horizon", {
   testthat::expect_error(optimal_policy_constraints(input, config), "within the loss evaluation horizon")
 })
 
-testthat::test_that("Optimal Policy resolves selected responses to display names", {
-  model <- list(M_ = list(varmeta = data.frame(
-    dynare_name = c("infl_obs", "r_obs"),
-    display_name = c("Trimmed Mean Inflation", "Cash Rate")
-  )))
+testthat::test_that("Optimal Policy offers the response display names every selected model has", {
+  with_growth <- dashboard_test_model("DINGO", include_gdp_growth = TRUE)
+  without_growth <- dashboard_test_model("MARTIN")
 
-  actual <- optimal_policy_response_display_names(model, c("r_obs", "infl_obs"))
-
-  testthat::expect_equal(actual, c("Cash Rate", "Trimmed Mean Inflation"))
+  testthat::expect_equal(
+    optimal_policy_response_choices(list(DINGO = with_growth, MARTIN = without_growth)),
+    c("Cash Rate" = "Cash Rate", "Inflation" = "Inflation")
+  )
+  testthat::expect_equal(
+    optimal_policy_response_choices(list(DINGO = with_growth)),
+    c("Cash Rate" = "Cash Rate", "Inflation" = "Inflation", "GDP Growth" = "GDP Growth")
+  )
+  testthat::expect_equal(optimal_policy_response_choices(list()), character())
 })
 
 testthat::test_that("Optimal Policy maps the Commitment control to timeless commitment", {
@@ -115,7 +119,10 @@ testthat::test_that("Optimal Policy maps the Commitment control to timeless comm
   actual <- optimal_policy_strategies(input, list(), config)
 
   testthat::expect_identical(vapply(actual, `[[`, character(1), "commit"), c("timeless", "disc"))
-  testthat::expect_identical(vapply(actual, `[[`, character(1), "output_name"), c("Optimal (DINGO, commitment)", "Optimal (DINGO, discretion)"))
+  # Strategies are model-independent: get_policy_scenarios() names each one
+  # per model (e.g. "Optimal (DINGO, commitment)").
+  testthat::expect_true(all(vapply(actual, function(strategy) is.null(strategy$output_name), logical(1))))
+  testthat::expect_identical(vapply(actual, `[[`, character(1), "instrument_shock"), c("eps_r", "eps_r"))
 })
 
 testthat::test_that("Optimal Policy uses the shared two-year plot-range convention", {

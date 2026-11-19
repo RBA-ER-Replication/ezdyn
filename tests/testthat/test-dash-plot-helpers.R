@@ -1,7 +1,14 @@
-testthat::test_that("dashboard_selected_plotter resolves the plot-style input with an automatic fallback", {
-  testthat::expect_equal(dashboard_selected_plotter(list(plotter = "ggplot")), "ggplot")
-  testthat::expect_equal(dashboard_selected_plotter(list(plotter = "ggrba")), ezdyn_resolve_plotter("ggrba"))
-  testthat::expect_equal(dashboard_selected_plotter(list(plotter = NULL)), ezdyn_resolve_plotter(NULL))
+testthat::test_that("dashboard_selected_plotter uses the plot-style input, else the configured backend", {
+  # A selected plot style wins.
+  testthat::expect_equal(dashboard_selected_plotter(list(plotter = "ggplot"), plotters = c("ggrba", "ggplot")), "ggplot")
+  testthat::expect_equal(dashboard_selected_plotter(list(plotter = "ggrba"), plotters = c("ggrba", "ggplot")), "ggrba")
+  # Without the control (one configured backend), use the configured backend,
+  # preferring ggrba.
+  testthat::expect_equal(dashboard_selected_plotter(list(plotter = NULL)), "ggplot")
+  testthat::expect_equal(dashboard_selected_plotter(list(), plotters = "ggrba"), "ggrba")
+  testthat::expect_equal(dashboard_selected_plotter(list(), plotters = c("ggplot", "ggrba")), "ggrba")
+  # A custom input identifier.
+  testthat::expect_equal(dashboard_selected_plotter(list(style = "ggplot"), plotters = "ggrba", plotter_input = "style"), "ggplot")
 })
 
 testthat::test_that("dashboard_sync_compatibility_mode toggles compatibility mode with the selected plotter", {

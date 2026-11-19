@@ -37,11 +37,12 @@ plot_pretty_irf_fixture <- function() {
 testthat::test_that("plot_pretty retains ordinary IRF graph-data structure", {
 	dynare <- load_dynare_irf_fixture()
 	pretty <- get_irf(dynare$M_, dynare$oo_, "eps_r", horizon = 2, pretty = TRUE)
-	if (requireNamespace("ggrba", quietly = TRUE)) {
-		actual <- plot_pretty(pretty)
-	} else {
-		testthat::expect_error(plot_pretty(pretty), "optional ggrba package")
-		actual <- plot_pretty(pretty, plotter = "ggplot")
+	# The default plotter is ggrba when it is installed, otherwise ggplot2.
+	actual <- plot_pretty(pretty)
+	if (!requireNamespace("ggrba", quietly = TRUE)) {
+		# Only an explicit ggrba request needs the optional package.
+		testthat::expect_error(plot_pretty(pretty, plotter = "ggrba"), "optional ggrba package")
+		testthat::expect_identical(plot_pretty(pretty, plotter = "ggplot")$graph_data, actual$graph_data)
 	}
 	legacy <- plot_pretty_irf(pretty, plotter = "ggplot")
 

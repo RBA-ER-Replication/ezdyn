@@ -1,19 +1,19 @@
-% Build MOO objects for Smets-Wouters (2007) plus a curated set of Pfeifer
-% DSGE_mod NK models - see README.md in this folder for full setup steps.
+% Build MOO objects for a curated set of 7 Pfeifer DSGE_mod NK models - see
+% README.md in this folder ("Rebuilding the model objects").
+%
+% Smets-Wouters (2007) is NOT built here: the dashboard uses a version with
+% anticipated monetary policy shocks, built from files in this repository by
+% Smets_Wouters_2007_anticipated/build_sw_anticipated.m.
 %
 % Prerequisite: clone the Pfeifer DSGE_mod collection into this folder as
 % "DSGE_mod":
 %   git clone https://github.com/JohannesPfeifer/DSGE_mod.git DSGE_mod
-% (run from dashboard/DSGEModDash - the folder name must be exactly
-% "DSGE_mod", matching what a fresh `git clone` of that repo produces).
+% (run from dashboard_example - the folder name must be exactly "DSGE_mod",
+% matching what a fresh `git clone` of that repo produces).
 %
 % Runs each replication .mod file directly through Dynare and exports the
-% resulting M_/oo_ objects to JSON for ezdyn::read_dynare(). Smets-Wouters
-% (Smets_Wouters_2007_45.mod) already has mode_compute=0, mh_replic=0 baked
-% into its own `estimation(...)` call, so it just evaluates the
-% likelihood/smoother at the supplied posterior mode (no optimization or
-% MCMC) rather than actually estimating. The other 7 models are calibrated
-% (no `estimation` command), solved via stoch_simul(order=1).
+% resulting M_/oo_ objects to JSON for ezdyn::read_dynare(). The 7 models are
+% calibrated (no `estimation` command), solved via stoch_simul(order=1).
 %
 % Two of the seven curated NK models leave their FINAL decision rule in a
 % non-baseline parameterization after running the paper's own multi-scenario
@@ -23,13 +23,24 @@
 % list, which still recomputes oo_.dr.ghx/ghu for ALL endogenous variables)
 % before export.
 %
-% Run from the repo root: matlab.exe -batch "run('dashboard/DSGEModDash/build_new_models.m')"
+% Run from the repo root: matlab -batch "run('dashboard_example/build_new_models.m')"
 
 script_dir = fileparts(mfilename('fullpath'));
-repo_root = fileparts(fileparts(script_dir));
+repo_root = fileparts(script_dir);
 
-addpath(genpath(fullfile(repo_root, 'functions')));
-addpath('C:\Program Files (x86)\dynare 6.4\matlab\');
+% export_model_obj_json() lives in the repo's ezDynare folder.
+addpath(fullfile(repo_root, 'ezDynare'));
+
+% Dynare: use the one already on the MATLAB path, otherwise this folder.
+% Change this to match your Dynare installation.
+dynare_matlab_dir = 'C:\Program Files (x86)\dynare 6.4\matlab\';
+if isempty(which('dynare'))
+    if ~exist(dynare_matlab_dir, 'dir')
+        error(['build_new_models: Dynare not found - add it to the MATLAB ' ...
+            'path, or set dynare_matlab_dir at the top of this script.']);
+    end
+    addpath(dynare_matlab_dir);
+end
 
 output_dir = fullfile(script_dir, 'inputs');
 if ~exist(output_dir, 'dir')
@@ -41,36 +52,6 @@ if ~exist(toolbox_dir, 'dir')
     error(['build_new_models: ' toolbox_dir ' not found - clone ' ...
         'https://github.com/JohannesPfeifer/DSGE_mod.git into this folder ' ...
         'as "DSGE_mod" first (see README.md).']);
-end
-
-%% Smets_Wouters_2007 - flagship estimated NK model (Smets & Wouters, 2007)
-try
-    clearvars -except script_dir repo_root output_dir toolbox_dir
-    model_dir = fullfile(toolbox_dir, 'Smets_Wouters_2007');
-    cd(model_dir);
-    dynare Smets_Wouters_2007_45.mod nograph nostrict
-    cd(script_dir);
-    export_model_obj_json(M_, oo_, fullfile(output_dir, 'SW_2007_45'));
-    disp("build_new_models: wrote " + fullfile(output_dir, 'SW_2007_45.json'));
-
-    % Also export the real historical estimation sample (usmodel_data.mat,
-    % the same varobs series used above) to CSV, so usa_dashboard.R can use
-    % it as the dashboard's real baseline history instead of a synthetic
-    % series. This is the standard Dynare/Pfeifer Smets-Wouters (2007) US
-    % dataset, 1947Q3-2004Q4 (230 quarters), fed to the model with no
-    % prefiltering (prefilter=0), so the raw values are already on the same
-    % scale as the model's own observables (dy, dc, dinve, labobs, pinfobs,
-    % dw, robs).
-    historical_data = load(fullfile(model_dir, 'usmodel_data.mat'));
-    historical_table = table( ...
-        historical_data.dy, historical_data.dc, historical_data.dinve, ...
-        historical_data.labobs, historical_data.pinfobs, historical_data.dw, historical_data.robs, ...
-        'VariableNames', {'dy', 'dc', 'dinve', 'labobs', 'pinfobs', 'dw', 'robs'});
-    writetable(historical_table, fullfile(output_dir, 'usmodel_data.csv'));
-    disp("build_new_models: wrote " + fullfile(output_dir, 'usmodel_data.csv'));
-catch ME
-    cd(script_dir);
-    fprintf(2, "FAILED SW_2007_45: %s\n", ME.message);
 end
 
 %% Gali_2015_chapter_3 - flagship baseline 3-equation NK model

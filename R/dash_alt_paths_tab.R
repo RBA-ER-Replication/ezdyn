@@ -180,7 +180,6 @@ UITab_AltPaths <- function(id, config) {
         choices = names(config$baselines),
         selected = config$default_baseline
       ),
-      shiny::tags$p(shiny::strong("Active baseline: "), shiny::textOutput(ns("active_baseline"), inline = TRUE)),
       shiny::tags$label(class = "control-label", paste0(config$instrument_display_name, " path:")),
       shiny::fluidRow(
         class = "slider-container",
@@ -198,7 +197,8 @@ UITab_AltPaths <- function(id, config) {
             max = config$timeline$forecast_end,
             value = plot_range
           ),
-          shinyWidgets::prettySwitch(ns("show_table"), "Show table", value = FALSE)
+          shinyWidgets::prettySwitch(ns("show_table"), "Show table", value = FALSE),
+          shiny::tags$p(shiny::strong("Active baseline: "), shiny::textOutput(ns("active_baseline"), inline = TRUE))
         )
       )
     ),
