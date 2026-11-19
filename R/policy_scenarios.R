@@ -27,7 +27,19 @@
 #' @param lambda Cognitive-discounting parameter.
 #' @param forecast_start First forecast quarter.
 #' @param forecast_end Final forecast quarter.
-#' @param loss_variable_vintages Optional long history for timeless commitment.
+#' @param loss_variable_vintages Past baselines for timeless commitment
+#'   (`commit = "timeless"`), as a long data frame: a `vintage` column (the
+#'   quarter each baseline was made in, its first forecast quarter), a `date`
+#'   column, and one `<loss variable>_gap_loss` column per loss variable, e.g.
+#'   `Inflation_gap_loss`. Each gap is the loss variable minus its target as
+#'   it stood at the time, in the same units as `baseline`; the loss squares
+#'   it. `<loss variable>` is named as in `loss_variables` (without the
+#'   suffix), by its display name or `model`'s own dynare code, so display
+#'   names let one table serve every model. A historical constraint (e.g. the
+#'   ELB) also needs the instrument's level, in a column named like
+#'   `instrument_variable`. Each vintage runs from its own quarter to at least
+#'   `T_loss` quarters after `forecast_start`, and vintages are needed for
+#'   every quarter from `preloss_start` to the one before `forecast_start`.
 #' @param preloss_start First historical commitment quarter for timeless policy.
 #' @param policy_irfs Optional cached array returned by [build_policy_irfs()].
 #'
@@ -127,13 +139,7 @@ get_policy_scenario <- function(
       originals_for[[key]] <- unique(c(originals_for[[key]], role$original[[i]]))
     }
   }
-  baseline_columns <- stats::setNames(vapply(variables, function(variable) {
-    if (variable %in% names(baseline)) return(variable)
-    candidates <- unique(c(originals_for[[variable]], display_name(variable, model$M_)))
-    found <- candidates[candidates %in% names(baseline)]
-    if (length(found) > 0) return(found[[1]])
-    NA_character_
-  }, character(1)), variables)
+  baseline_columns <- ezdyn_policy_columns(names(baseline), variables, originals_for, model$M_)
 
   missing_variables <- policy_variables[is.na(baseline_columns[policy_variables])]
   if (length(missing_variables) > 0) {
@@ -141,8 +147,7 @@ get_policy_scenario <- function(
   }
 
   baseline$date <- as.Date(baseline$date)
-  found_columns <- baseline_columns[!is.na(baseline_columns) & baseline_columns != names(baseline_columns)]
-  names(baseline)[match(found_columns, names(baseline))] <- names(found_columns)
+  baseline <- ezdyn_policy_rename_columns(baseline, baseline_columns)
   baseline_forecast <- baseline[match(forecast_dates, baseline$date), variables, drop = FALSE]
   if (anyNA(baseline_forecast[, policy_variables, drop = FALSE])) {
     stop("Baseline must cover every forecast quarter and contain complete policy inputs.", call. = FALSE)
@@ -190,6 +195,13 @@ get_policy_scenario <- function(
       constraint_Y0, constraint_dY, constraint_weights, discount_factor, constraint_matrices
     )
   } else {
+    # Vintage columns are located the same way as baseline columns, then
+    # renamed to the resolved identifiers used below.
+    loss_variable_vintages <- ezdyn_policy_vintages(
+      loss_variable_vintages, loss_variables, instrument_variable,
+      any(vapply(constraints, function(x) isTRUE(x$historical), logical(1))),
+      originals_for, model$M_
+    )
     history <- ezdyn_policy_history(
       loss_variable_vintages, loss_variables, preloss_start, forecast_start, T_loss, loss_Y0
     )
@@ -289,7 +301,8 @@ get_policy_scenario <- function(
 #' @param lambda Cognitive-discounting parameter.
 #' @param forecast_start First forecast quarter.
 #' @param forecast_end Final forecast quarter.
-#' @param loss_variable_vintages Optional long history for timeless commitment.
+#' @param loss_variable_vintages Past baselines for timeless commitment; see
+#'   [get_policy_scenario()] for the format.
 #' @param preloss_start First historical commitment quarter for timeless policy.
 #' @param irf_cache Optional environment used to cache each model/strategy's
 #'   [build_policy_irfs()] result across repeated calls (e.g. across Shiny
@@ -787,22 +800,115 @@ ezdyn_policy_discretion_failure <- function(message) {
   ))
 }
 
+# Locate each resolved policy variable's column among `columns`: the resolved
+# identifier itself, any identifier it was originally supplied as
+# (`originals_for`), or `M_`'s display name for it (`<display name>_gap_loss`
+# for a gap column). Returns the matching column name per variable, or `NA`.
+ezdyn_policy_columns <- function(columns, variables, originals_for, M_) {
+  stats::setNames(vapply(variables, function(variable) {
+    if (variable %in% columns) return(variable)
+    base <- sub("_gap_loss$", "", variable)
+    shown <- display_name(base, M_)
+    if (base != variable) shown <- paste0(shown, "_gap_loss")
+    candidates <- unique(c(originals_for[[variable]], shown))
+    found <- candidates[candidates %in% columns]
+    if (length(found) > 0) return(found[[1]])
+    NA_character_
+  }, character(1)), variables)
+}
+
+# Rename the columns located by `ezdyn_policy_columns()` to their resolved
+# identifiers.
+ezdyn_policy_rename_columns <- function(data, columns) {
+  found <- columns[!is.na(columns) & columns != names(columns)]
+  names(data)[match(found, names(data))] <- names(found)
+  data
+}
+
+# Check and prepare timeless-commitment vintages: locate one
+# `<loss variable>_gap_loss` column per loss variable (and the instrument's
+# level when a historical constraint needs it), named as in the strategy or
+# by display name, and rename them to the resolved identifiers.
+ezdyn_policy_vintages <- function(vintages, loss_variables, instrument_variable, historical, originals_for, M_) {
+  # Name each column as the user supplied the variable, e.g. a display name.
+  expected <- function(variables) {
+    vapply(variables, function(variable) {
+      original <- originals_for[[variable]]
+      if (length(original) > 0) original[[1]] else variable
+    }, character(1), USE.NAMES = FALSE)
+  }
+  if (is.null(vintages)) {
+    stop(sprintf(
+      "Timeless commitment needs loss-variable vintages (`loss_variable_vintages`): a data frame with `vintage` and `date` columns and the column(s) %s.",
+      paste0("`", expected(loss_variables), "`", collapse = ", ")
+    ), call. = FALSE)
+  }
+  missing_keys <- setdiff(c("vintage", "date"), names(vintages))
+  if (length(missing_keys) > 0) {
+    stop(sprintf("Loss-variable vintages are missing the %s column(s).", paste0("`", missing_keys, "`", collapse = ", ")), call. = FALSE)
+  }
+  needed <- loss_variables
+  if (historical) needed <- unique(c(needed, instrument_variable))
+  columns <- ezdyn_policy_columns(names(vintages), needed, originals_for, M_)
+  missing <- needed[is.na(columns)]
+  if (length(missing) > 0) {
+    missing_gaps <- intersect(missing, loss_variables)
+    problems <- c(
+      if (length(missing_gaps) > 0) sprintf(
+        "%s (one `<loss variable>_gap_loss` column per loss variable: the gap from its target at the time)",
+        paste0("`", expected(missing_gaps), "`", collapse = ", ")
+      ),
+      if (instrument_variable %in% missing) sprintf(
+        "`%s` (the instrument's level, for the historical ELB/bound constraint)",
+        expected(instrument_variable)
+      )
+    )
+    stop(sprintf(
+      "Loss-variable vintages are missing column(s) needed for timeless commitment: %s.",
+      paste(problems, collapse = "; and ")
+    ), call. = FALSE)
+  }
+  vintages <- ezdyn_policy_rename_columns(as.data.frame(vintages), columns)
+  vintages$vintage <- as.Date(vintages$vintage)
+  vintages$date <- as.Date(vintages$date)
+  # Keep the supplied column names for error messages.
+  attr(vintages, "ezdyn_columns") <- columns
+  vintages
+}
+
 ezdyn_policy_history <- function(vintages, variables, preloss_start, forecast_start, horizon, current) {
   if (is.null(vintages)) stop("Timeless commitment requires loss-variable vintages.", call. = FALSE)
   required <- c("date", "vintage", variables)
-  if (!all(required %in% names(vintages))) stop("Loss-variable vintages are incomplete.", call. = FALSE)
+  if (!all(required %in% names(vintages))) {
+    stop(sprintf(
+      "Loss-variable vintages are missing column(s): %s.",
+      paste0("`", setdiff(required, names(vintages)), "`", collapse = ", ")
+    ), call. = FALSE)
+  }
   vintage_dates <- seq(as.Date(preloss_start), as.Date(forecast_start), by = "quarter")
   dates <- seq(as.Date(preloss_start), by = "quarter", length.out = length(vintage_dates) - 1 + horizon)
   out <- array(NA_real_, c(length(variables), length(dates), length(vintage_dates)), list(variables, as.character(dates), as.character(vintage_dates)))
   for (i in seq_len(length(vintage_dates) - 1)) {
     slice <- vintages[
-      vintages$vintage == vintage_dates[[i]] & as.Date(vintages$date) %in% dates,
+      as.Date(vintages$vintage) == vintage_dates[[i]] & as.Date(vintages$date) %in% dates,
       c("date", variables),
       drop = FALSE
     ]
     positions <- match(as.Date(slice$date), dates)
     out[, positions, i] <- t(as.matrix(slice[, variables, drop = FALSE]))
-    if (anyNA(out[, i:length(dates), i])) stop("Loss-variable vintages are incomplete over the required horizon.", call. = FALSE)
+    incomplete <- is.na(out[, i:length(dates), i, drop = FALSE])
+    if (any(incomplete)) {
+      labels <- attr(vintages, "ezdyn_columns")
+      missing <- variables[apply(incomplete, 1, any)]
+      if (!is.null(labels)) missing <- unname(labels[missing])
+      stop(sprintf(
+        "Loss-variable vintage %s is incomplete: %s must cover every quarter from %s to %s.",
+        format(vintage_dates[[i]]),
+        paste0("`", missing, "`", collapse = ", "),
+        format(vintage_dates[[i]]),
+        format(dates[[length(dates)]])
+      ), call. = FALSE)
+    }
   }
   start <- length(vintage_dates)
   out[, start:(start + horizon - 1), length(vintage_dates)] <- current
@@ -811,17 +917,20 @@ ezdyn_policy_history <- function(vintages, variables, preloss_start, forecast_st
 
 ezdyn_policy_timeless_constraints <- function(constraints, dY, Y0, vintages, preloss_start, forecast_start, horizon, instrument_variable) {
   preloss <- length(seq(as.Date(preloss_start), as.Date(forecast_start), by = "quarter")) - 1L
-  instrument_history <- ezdyn_policy_history(
-    vintages, instrument_variable, preloss_start, forecast_start, horizon,
-    Y0[instrument_variable, , drop = FALSE]
-  )
   historical <- Filter(function(x) isTRUE(x$historical), constraints)
   current <- Filter(function(x) !isTRUE(x$historical), constraints)
+  # The instrument's history is only needed for historical constraints.
+  instrument_history <- if (length(historical) > 0) {
+    ezdyn_policy_history(
+      vintages, instrument_variable, preloss_start, forecast_start, horizon,
+      Y0[instrument_variable, , drop = FALSE]
+    )
+  }
   lapply(seq_len(preloss + 1L), function(period) {
     remaining <- dim(dY)[3] - period + 1L
     historical_period <- lapply(historical, function(x) { x$period <- seq_len(remaining); x })
     current_data <- if (period == preloss + 1L) ezdyn_policy_constraints(current, dY[, seq_len(horizon), seq_len(dim(dY)[3] - preloss), drop = FALSE], Y0) else list(A_ineq = matrix(0, 0, remaining), b_ineq = numeric())
-    history_data <- ezdyn_policy_constraints(
+    history_data <- if (length(historical) == 0) list(A_ineq = matrix(0, 0, remaining), b_ineq = numeric()) else ezdyn_policy_constraints(
       historical_period,
       dY[instrument_variable, seq_len(remaining), seq_len(remaining), drop = FALSE],
       matrix(

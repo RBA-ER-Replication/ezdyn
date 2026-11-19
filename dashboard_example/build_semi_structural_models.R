@@ -57,10 +57,12 @@ irfs <- purrr::imap(shocks, \(field, model) {
 # "Output Gap"), so the models share the dashboard baseline and Optimal
 # Policy settings. As in build_model_metadata.R, derived rows add the common
 # "Output" (the output gap, as potential is unaffected), "Inflation
-# (year-ended)" (four-quarter sum of quarterly inflation) and "Nominal Interest
-# Rate (quarterly)" variables. "Nominal Interest Rate" is shown annualised (x 4
-# on the quarterly `robs`). The output gap has no real-data baseline, so it is
-# left out of Alternative Paths.
+# (year-ended)" (four-quarter sum of quarterly inflation), "Nominal Interest
+# Rate (quarterly)" and "Nominal Interest Rate Changes" (the quarterly change in
+# the annualised rate, for Optimal Policy's loss function) variables. "Nominal
+# Interest Rate" is shown annualised (x 4 on the quarterly `robs`). The output
+# gap has no real-data baseline, so it is left out of Alternative Paths, as are
+# rate changes.
 variables <- tribble(
   ~dynare_name, ~display_name,                       ~units,                                 ~alt_paths, ~scale_formula, ~derived_from, ~derived_transform,
   "ygap",       "Output Gap",                        "Per cent deviation from steady state", FALSE,      NA,             NA,            NA,
@@ -69,7 +71,8 @@ variables <- tribble(
   "pinfobs",    "Inflation",                         "Per cent (quarterly)",                 TRUE,       NA,             NA,            NA,
   "pinfobs_ye", "Inflation (year-ended)",            "Per cent (year-ended)",                TRUE,       NA,             "pinfobs",     "year_ended_sum",
   "robs",       "Nominal Interest Rate",             "Per cent (annualized)",                TRUE,       "4",            NA,            NA,
-  "robs_q",     "Nominal Interest Rate (quarterly)", "Per cent (quarterly)",                 TRUE,       "0.25",         "robs",        NA
+  "robs_q",     "Nominal Interest Rate (quarterly)", "Per cent (quarterly)",                 TRUE,       "0.25",         "robs",        NA,
+  "robs_change", "Nominal Interest Rate Changes",    "Percentage points (annualized)",       FALSE,      NA,             "robs",        "diff"
 ) |>
   mutate(
     irf = TRUE,
@@ -81,10 +84,15 @@ variables <- tribble(
   ) |>
   # Plot axis unit symbols, as in build_model_metadata.R: impulse responses
   # are changes from baseline, so rates move in percentage points, while
-  # Alternative Paths plot levels, so rates are per cent.
+  # Alternative Paths plot levels, so rates are per cent. A change in a rate
+  # is in percentage points either way.
   mutate(
     unit_symbol_irf = if_else(units == "Per cent deviation from steady state", "% dev", "ppt"),
-    unit_symbol_baseline = if_else(units == "Per cent deviation from steady state", "% dev", "%"),
+    unit_symbol_baseline = case_when(
+      units == "Per cent deviation from steady state" ~ "% dev",
+      grepl("^Percentage points", units) ~ "ppt",
+      .default = "%"
+    ),
     .after = units
   )
 
