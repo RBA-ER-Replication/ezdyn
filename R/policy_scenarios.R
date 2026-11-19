@@ -1,6 +1,58 @@
 # Optimal policy scenarios ---------------------------------------------------
 
-#' Run one optimal-policy scenario for one model.
+#' Run one optimal-policy scenario for one model
+#'
+#' `get_policy_scenario()` implements the sufficient-statistics approach to
+#' optimal policy: given a quadratic loss function, a baseline forecast, and
+#' a model's policy impulse responses, it solves for the optimal path of the
+#' policy instrument (and the implications for every other output variable)
+#' under commitment or discretion, with optional constraints.
+#'
+#' ```r
+#' strategy <- list(
+#'   output_name      = "Optimal (ModelA, commitment)",
+#'   output_variables = c("Cash Rate", "Inflation", "Unemployment"),
+#'   loss_variables   = c("Inflation", "Unemployment", "Cash Rate"),
+#'   loss_weights     = c(1, 1, 0.5),
+#'   discount_factor  = 0.99,
+#'   T_loss           = 20,
+#'   T_instrument     = 20,
+#'   commit           = "commit"
+#' )
+#'
+#' optimal <- get_policy_scenario(strategy, baseline = baseline, model = models$ModelA,
+#'                                 forecast_start = "2026-09-01",
+#'                                 forecast_end   = "2031-06-01")
+#'
+#' plot_pretty(optimal,
+#'             display_names = c("Cash Rate", "Inflation", "Unemployment"))$graph
+#' ```
+#' The baseline must be constructed first (e.g. with [import_baseline()]).
+#' `T_loss` is the number of forecast quarters over which the loss is
+#' counted; `T_instrument` is the number of quarters of policy shocks chosen
+#' (i.e. over which policy is optimised). Both must lie between 1 and the
+#' number of quarters from `forecast_start` to `forecast_end`. Under
+#' discretion, `T_loss` must also be at least `T_instrument`: policy is re-set
+#' in each instrument quarter to minimise the loss from then on, so every
+#' instrument quarter must fall within the loss horizon.
+#'
+#' `commit` selects the strategy: `"disc"` for discretion, or one of two
+#' forms of commitment - `"commit"`, in which commitment starts today, and
+#' `"timeless"`, in which commitment is assumed to have been in place since
+#' some past date, `preloss_start` (see below). Loss variables are
+#' penalised as deviations from zero; to target a non-zero value, construct
+#' a gap variable by subtracting the target from the actual variable, add it
+#' to the baseline (and vintages), e.g. `Inflation_gap_loss`, and use it as
+#' the loss variable.
+#'
+#' For a model whose policy shocks are all unanticipated - because
+#' `use_cd = FALSE`, `lambda = 0`, or the model has no anticipated shocks
+#' (`<shock>_1`, `<shock>_2`, ...) - commitment and discretion coincide. An
+#' error is raised if the model's impulse responses or anticipated shocks
+#' do not cover the required horizon (including any commitment history).
+#'
+#' See [get_policy_scenarios()] to run a list of strategies across a list of
+#' models at once (as the dashboard does).
 #'
 #' `baseline` has a quarterly `date` column and includes the output, loss,
 #' constraint, and instrument variables named in `policy_strategy`, each
@@ -8,12 +60,51 @@
 #' baseline returned by [import_baseline()]) its display name. The returned
 #' paths are rescaled and labelled with model metadata.
 #'
+#' @section Commitment start and forecast vintages:
+#' Under `"timeless"`, the problem is re-solved at each historical forecast
+#' vintage from `preloss_start` to today, so it needs those forecasts, via
+#' `loss_variable_vintages` and `preloss_start`:
+#' ```r
+#' strategy$commit <- "timeless"
+#' optimal <- get_policy_scenario(strategy, baseline = baseline, model = models$ModelA,
+#'                                 forecast_start = "2026-09-01",
+#'                                 forecast_end   = "2031-06-01",
+#'                                 loss_variable_vintages = vintages,
+#'                                 preloss_start  = "2024-03-01")
+#' ```
+#' `loss_variable_vintages` is a long data frame with columns:
+#' * `vintage`: the first forecast quarter of each historical forecast, one
+#'   per quarter from `preloss_start` to the quarter before `forecast_start`;
+#' * `date`: the quarter being forecast, from the vintage quarter to the end
+#'   of today's loss horizon;
+#' * one column per loss variable, named as in `loss_variables` - by display
+#'   name (e.g. `Inflation_gap_loss`) or by the model's own variable code
+#'   (e.g. `pi_obs_gap_loss`) - and already expressed as a deviation from
+#'   target. Display names let one table serve every model; and
+#' * only if a constraint is marked `historical = TRUE` (see below), the
+#'   policy instrument's level, named like `instrument_variable` (e.g.
+#'   `Cash Rate` or `r_obs`).
+#'
+#' Each vintage must cover every quarter from its own first forecast quarter
+#' to the end of today's loss horizon, and today's forecast is taken from
+#' `baseline`.
+#'
+#' @section Constraints:
+#' An optional `constraints` entry in `policy_strategy` is a list of
+#' bounds, each a list with `variable`, `direction` (`"lower"` or
+#' `"upper"`), `value`, and `period` (forecast periods, with 1 the first
+#' forecast quarter; periods beyond `T_loss` are ignored), e.g.
+#' `list(variable = "Cash Rate", direction = "lower", value = 0.1, period = 1:20)`.
+#' Under `"timeless"`, a bound on the policy instrument can also be marked
+#' `historical = TRUE`, so it is assumed to have been in place in every
+#' historical vintage as well, generating "make-up" policy today via the
+#' carried-forward Lagrange multipliers. This needs the instrument's level in
+#' `loss_variable_vintages`.
+#'
 #' @param policy_strategy Named list with `output_name`, `output_variables`,
 #'   `loss_variables`, `loss_weights`, `discount_factor`, `T_loss`,
 #'   `T_instrument`, and `commit` (`"commit"`, `"timeless"`, or `"disc"`).
-#'   Discretion (`"disc"`) needs `T_loss >= T_instrument`: the policymaker
-#'   re-optimises in each instrument period, against the loss from then to
-#'   `T_loss`. Optional `instrument_variable` and `instrument_shock` identify the model's
+#'   Optional `instrument_variable` and `instrument_shock` identify the model's
 #'   policy instrument and innovation. Variable entries (`output_variables`,
 #'   `loss_variables`, `instrument_variable`, and constraint `variable`s) may
 #'   be display names or dynare codes, resolved against `model`; a trailing
@@ -27,23 +118,14 @@
 #' @param lambda Cognitive-discounting parameter.
 #' @param forecast_start First forecast quarter.
 #' @param forecast_end Final forecast quarter.
-#' @param loss_variable_vintages Past baselines for timeless commitment
-#'   (`commit = "timeless"`), as a long data frame: a `vintage` column (the
-#'   quarter each baseline was made in, its first forecast quarter), a `date`
-#'   column, and one `<loss variable>_gap_loss` column per loss variable, e.g.
-#'   `Inflation_gap_loss`. Each gap is the loss variable minus its target as
-#'   it stood at the time, in the same units as `baseline`; the loss squares
-#'   it. `<loss variable>` is named as in `loss_variables` (without the
-#'   suffix), by its display name or `model`'s own dynare code, so display
-#'   names let one table serve every model. A historical constraint (e.g. the
-#'   ELB) also needs the instrument's level, in a column named like
-#'   `instrument_variable`. Each vintage runs from its own quarter to at least
-#'   `T_loss` quarters after `forecast_start`, and vintages are needed for
-#'   every quarter from `preloss_start` to the one before `forecast_start`.
+#' @param loss_variable_vintages Historical forecasts for timeless commitment,
+#'   as described in "Commitment start and forecast vintages". Only used when
+#'   `commit = "timeless"`.
 #' @param preloss_start First historical commitment quarter for timeless policy.
 #' @param policy_irfs Optional cached array returned by [build_policy_irfs()].
 #'
 #' @return A long data frame containing baseline and alternative paths.
+#' @md
 #' @export
 get_policy_scenario <- function(
     policy_strategy,

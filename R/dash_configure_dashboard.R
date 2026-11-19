@@ -609,116 +609,494 @@ dashboard_validate_plotters <- function(plotters) {
   plotters
 }
 
-#' Create and validate a configuration for an ezdyn dashboard.
+#' Configure an ezdyn dashboard
 #'
-#' This constructor only validates supplied objects. It does not read files,
-#' load models, build baselines, or start a Shiny app.
+#' @description
+#' `configure_dashboard()` gathers everything an ezdyn dashboard needs - the
+#' models, the dates, the baseline forecasts and each tab's settings - into one
+#' checked configuration. Pass the result to [ezdyn_dashboard()] to build the
+#' Shiny app.
 #'
-#' @param name Dashboard title.
-#' @param models Named list of full Dynare or custom-MOO pairs.
-#' @param timeline Named list containing quarterly Date values `data_start`,
-#'   `data_end`, `forecast_start`, and `forecast_end`. Optionally also
-#'   `hsd_data_start`, the calendar quarter that `t == 1` represents in the
-#'   Historical Shock Decomposition tab (passed to `ez_hd()`'s `data_start`);
-#'   defaults to `data_start` when omitted. Set it explicitly when a model's
-#'   true smoothed-estimation-sample start differs from `data_start`.
-#' @param baselines Named list of canonical `ezdyn_baseline` objects.
+#' It only checks what you give it: it doesn't read files, load models, build
+#' baselines or start the app. Load the models with [read_dynare()] or
+#' [custom_moo()] and build each baseline with [import_baseline()] first.
+#'
+#' Only the first four arguments are required. Every other argument has a
+#' default that gives a working dashboard: the tab settings come next, then
+#' optional extras. The one exception to "the later, the less likely you need
+#' it" is the pair of instrument settings, which must match your models'
+#' names. The sections below walk through them:
+#'
+#' 1. **What you must supply**: `models`, `timeline`, `baselines`,
+#'    `default_baseline`.
+#' 2. **The tabs**: which tabs the dashboard shows, and which argument
+#'    controls each.
+#' 3. **Two settings to check**: `instrument_display_name` and
+#'    `instrument_shock_name`, which must match your models.
+#' 4. **The tab settings**: `hsd`, `optimal_policy`, `alt_paths` and `irf`,
+#'    each a list of options, with their own sections below.
+#' 5. **Optional extras**: everything else, which you can ignore when setting
+#'    up a dashboard.
+#'
+#' A complete, working example is the USA dashboard in the package
+#' repository's `dashboard_example/usa_dashboard.R`.
+#'
+#' @section What you must supply:
+#'
+#' * **`models`**: a named list of models, each loaded with [read_dynare()]
+#'   (a solved Dynare model) or [custom_moo()] (impulse responses from any
+#'   other source, e.g. a VAR). The names are the labels the dashboard shows,
+#'   e.g. `list("Smets Wouters (2007)" = sw, "My VAR" = var)`. Give each
+#'   model a `colour` when you load it, so its lines are easy to tell apart.
+#'
+#' * **`timeline`**: a list of four dates, each the first day of a quarter's
+#'   last month (March, June, September or December, e.g.
+#'   `as.Date("2026-09-01")` for 2026Q3):
+#'   - `data_start`: the first quarter of history shown;
+#'   - `forecast_start`: the first forecast quarter;
+#'   - `forecast_end`: the last forecast quarter. Alternative Policy Paths
+#'     gives the user one slider per quarter from `forecast_start` to here,
+#'     so 8 to 12 quarters is typical;
+#'   - `data_end`: the last quarter of the baseline. It can run past
+#'     `forecast_end`, e.g. to give Optimal Policy a longer horizon.
+#'
+#'   They must satisfy `data_start <= forecast_start <= forecast_end <=
+#'   data_end`. An optional fifth date, `hsd_data_start`, is only needed if
+#'   your models' historical shock decompositions start at a different
+#'   quarter from `data_start`.
+#'
+#' * **`baselines`**: a named list of one or more baseline forecasts, each
+#'   built with [import_baseline()], so its columns are display names in the
+#'   dashboard's units. Each must cover every quarter from `data_start` to
+#'   `forecast_end`. Users choose between them, and can upload more, in the
+#'   app.
+#'
+#' * **`default_baseline`**: the name of the baseline selected when the
+#'   dashboard opens.
+#'
+#' One more requirement: at least one model must have a historical shock
+#' decomposition (an estimated Dynare model, with smoothed shocks and
+#' variables), because the Historical Shock Decomposition tab is always shown.
+#'
+#' @section The tabs:
+#'
+#' | Tab | Shown | Configured by |
+#' |---|---|---|
+#' | Overview | Only if `overview` supplies content | `overview` |
+#' | Alternative Policy Paths | Always | `alt_paths`, the instrument settings |
+#' | Impulse Response Library | Always | `irf` |
+#' | Historical Shock Decompositions | Always (needs one model with a decomposition) | `hsd` |
+#' | Optimal Policy | Only if `optimal_policy` is supplied | `optimal_policy` |
+#'
+#' Every tab works with its defaults, except Optimal Policy, which needs a
+#' few settings of its own (see "Optimal Policy" below).
+#'
+#' Throughout, variables are referred to by their **display names**, the
+#' `display_name` column of each model's metadata (e.g. "Inflation"), not
+#' their model codes (e.g. `pinfobs`). Display names are what let one setting
+#' apply to several models whose codes differ. A tab only offers a variable
+#' that every selected model has.
+#'
+#' @section Two settings to check:
+#'
+#' Alternative Policy Paths moves the policy interest rate, and needs to know
+#' which variable and shock that is in your models:
+#'
+#' * `instrument_display_name` (default `"Cash Rate"`): the display name of
+#'   the policy rate.
+#' * `instrument_shock_name` (default `"Monetary policy shock"`): the
+#'   description (or code) of the monetary policy shock.
+#'
+#' Set them if your models' metadata name these differently, e.g.
+#' `instrument_display_name = "Nominal Interest Rate"`. They are the only
+#' settings outside the required four that a new dashboard is likely to need.
+#' `name` sets the title shown at the top of the dashboard.
+#'
+#' @section Historical Shock Decompositions (`hsd`):
+#'
+#' The tab shows how each model attributes history to its shocks. Settings,
+#' all optional:
+#'
+#' * `models`: the models offered. Defaults to every model; models without a
+#'   historical shock decomposition are dropped automatically.
+#' * `display_names`: the variables selected when the tab opens (default
+#'   none).
+#' * `shock_group`: the shock grouping selected when the tab opens. A grouping
+#'   is any extra column of a model's shock metadata (e.g.
+#'   "Demand/Supply/Monetary"), which adds up the contributions of the shocks
+#'   in each group. `NULL` (the default) shows each shock separately.
+#' * `preamble_ui`: a function returning UI shown above the chart, e.g. a
+#'   short explanation.
+#'
+#' @section Alternative Policy Paths (`alt_paths`):
+#'
+#' The user sets a path for the policy rate, one slider per forecast quarter,
+#' and the tab shows each model's response: the policy shocks that would
+#' deliver that path, and their effects on the other variables. Optionally,
+#' it uses anticipated (announced) shocks, for models that have them, with a
+#' "cognitive discounting" parameter that sets how far ahead people look.
+#' Settings, all optional:
+#'
+#' * `models`: the models offered (default: all).
+#' * `defaults$models`: the models selected when the tab opens (default: all
+#'   offered models).
+#' * `defaults$display_names`: the variables plotted when the tab opens.
+#'   Defaults to `irf$defaults$display_names`.
+#' * `defaults$lambda`: the initial cognitive discounting parameter, between
+#'   0 and 1 (default 0.8).
+#'
+#' The sliders themselves are set by `instrument_display_name` and, rarely,
+#' `r_slider_range`, `r_slider_step` and `cr_button_step` (see "Optional extras" below).
+#'
+#' ```r
+#' alt_paths = list(defaults = list(
+#'   models = "Smets Wouters (2007)",
+#'   display_names = c("Inflation (year-ended)", "Nominal Interest Rate"),
+#'   lambda = 0.8
+#' ))
+#' ```
+#'
+#' @section Impulse Response Library (`irf`):
+#'
+#' The tab shows the models' impulse responses, in up to three modes:
+#'
+#' * **Custom IRF**: a chosen shock, scaled so that a chosen "target"
+#'   variable moves by a chosen amount in the first quarter (e.g. a shock
+#'   that raises the policy rate by 1 percentage point). Comparing models this
+#'   way puts them on a like-for-like footing.
+#' * **Custom IRF (raw shocks)**: a one-unit shock, unscaled.
+#' * **Default (Pre-prepared scenarios)**: responses you computed in advance
+#'   and supply in `irf$scenarios`. This mode appears only if you do.
+#'
+#' Settings, all optional, in `irf$defaults`:
+#'
+#' * `models`: the models selected when the tab opens (default: all).
+#' * `display_names`: the variables plotted when the tab opens. The default,
+#'   "Trimmed Mean Inflation (ye)", suits RBA models only, so set this to
+#'   variables your models have. Alternative Policy Paths uses it too, unless
+#'   `alt_paths$defaults$display_names` is set.
+#' * `target_display_name`: Custom IRF's initial target variable. Defaults to
+#'   the first of `display_names` that can be targeted.
+#' * `shock`: the description of the shock selected when the tab opens.
+#' * `horizon`: the number of quarters shown (default 40).
+#' * `use_cd`, `lambda`: whether Custom IRF starts with cognitive discounting
+#'   on (default `FALSE`), and its initial parameter (default 0).
+#'
+#' `irf$scenarios` is a data frame of pre-computed responses with columns
+#' `scenario` (the scenario's label), `t`, `shock`, `dynare_name`,
+#' `display_name`, `display_unit`, `value`, `model_name` (a configured model
+#' label) and, optionally, `footnote`.
+#'
+#' ```r
+#' irf = list(defaults = list(
+#'   display_names = c("Nominal Interest Rate", "Inflation"),
+#'   horizon = 20
+#' ))
+#' ```
+#'
+#' @section Optimal Policy (`optimal_policy`):
+#'
+#' The tab finds the policy rate path that minimises a loss function: the
+#' weighted sum of squared gaps between chosen variables and their targets.
+#' The user picks the loss variables, their weights and targets, the
+#' strategy (commitment or discretion), the horizons, and any bounds on
+#' variables (including an effective lower bound on the rate). It runs
+#' [get_policy_scenario()] for each selected model and strategy, which
+#' explains the method: the tab's "loss evaluation horizon" and "optimisation
+#' horizon" are its `T_loss` and `T_instrument`, and the tab builds the
+#' `<loss variable>_gap_loss` columns itself, from the baseline and the
+#' targets the user sets. The tab is only shown if you supply
+#' `optimal_policy`, and it then needs:
+#'
+#' * `forecast_end` (required): the last quarter of the policy horizon, at or
+#'   after `timeline$forecast_start`. Often the end of the baseline
+#'   (`timeline$data_end`). Every baseline must cover every quarter up to
+#'   here, or be extended to it by `extend_baseline` (see "Advanced" below).
+#' * `loss_variable_choices` (required): the variables offered for the loss
+#'   function, as a character vector of display names, e.g.
+#'   `c("Inflation", "Output Growth")`. Each is labelled with its own name; to
+#'   relabel one, name it, e.g. `c("Output gap" = "Output")`.
+#' * `constraint_variable_choices` (required): the variables that can be
+#'   given upper or lower bounds, in the same form.
+#' * `instrument_variable` and `instrument_shock`: the policy rate and
+#'   monetary policy shock, as display names or codes. Their defaults
+#'   (`"r_obs"` and `"eps_r"`) only suit RBA models, so set them, usually to
+#'   the same values as `instrument_display_name` and
+#'   `instrument_shock_name`.
+#'
+#' Worth setting for a good first view, all optional:
+#'
+#' * `defaults$models`: the models selected when the tab opens (default: all
+#'   offered). `models` is the list offered (default: all).
+#' * `default_response_variables`: the variables plotted when the tab opens.
+#' * `default_loss_variables`: the loss variables selected when the tab opens.
+#' * `loss_variable_defaults`: initial targets, as a named numeric vector,
+#'   e.g. `c("Inflation" = 0.5)`. Unlisted variables start at 0.
+#' * `loss_variable_weight_defaults`: initial weights, in the same form.
+#'   Unlisted variables start at 1.
+#' * `use_cd` and `lambda`: whether the tab offers anticipated policy shocks
+#'   (for models that have them), and the initial anticipation parameter.
+#'   Without anticipated shocks, commitment and discretion give the same path.
+#'
+#' Timeless commitment, optional:
+#'
+#' * `loss_variable_vintages`: past baselines, so that "Commitment" assumes
+#'   policy was committed to in some past quarter and re-solved each quarter
+#'   since, using the baseline of the time. Without them, Commitment is
+#'   ordinary commitment from the forecast start. It's a data frame with
+#'   `vintage` and `date` columns and one `<loss variable>_gap_loss` column per
+#'   loss variable (e.g. `Inflation_gap_loss`): unlike the baseline, these
+#'   must already be gaps, from the target as it stood at the time. The
+#'   "ELB" option also needs the policy rate's level, in a column named like
+#'   `instrument_variable`: under timeless commitment the ELB is assumed to
+#'   have applied in every past vintage too, which can call for "make-up"
+#'   policy today. See [get_policy_scenario()] for the full format.
+#' * `preloss_start`: the earliest commitment start the user can choose,
+#'   usually the first vintage (default `timeline$forecast_start`).
+#'
+#' Advanced, rarely needed:
+#'
+#' * `baseline_model`: the model whose metadata names the baseline's
+#'   variables (default: the first of `models`).
+#' * `prepare_baseline(baseline, model, policy_config)` and
+#'   `extend_baseline(baseline, policy_config)`: functions that adjust or
+#'   extend the selected baseline before the calculation, e.g. to extend it to
+#'   `forecast_end`. Both default to leaving it unchanged.
+#' * `elb_variable`: the variable the "ELB" option bounds (default
+#'   `instrument_variable`).
+#' * `description_ui`: a function returning the tab's introductory UI.
+#' * `help`: a named list of functions, each returning a
+#'   [shiny::modalDialog()], for the tab's help buttons: `cd`, `strategy`,
+#'   `loss_variables`, `loss_horizon`, `instrument_horizon`, `constraints` and
+#'   `commitment_start`. Missing ones show a generic message.
+#' * `enabled = FALSE`: hides the tab while keeping its settings.
+#'
+#' ```r
+#' optimal_policy = list(
+#'   forecast_end = timeline$data_end,
+#'   instrument_variable = "Nominal Interest Rate",
+#'   instrument_shock = "Monetary policy shock",
+#'   loss_variable_choices = c("Inflation", "Output Growth", "Nominal Interest Rate Changes"),
+#'   constraint_variable_choices = c("Nominal Interest Rate", "Inflation"),
+#'   default_response_variables = c("Inflation", "Output Growth", "Nominal Interest Rate"),
+#'   default_loss_variables = c("Inflation", "Output Growth"),
+#'   loss_variable_defaults = c("Inflation" = 0.5)
+#' )
+#' ```
+#'
+#' @section Optional extras:
+#'
+#' You can leave all of these at their defaults when setting up a dashboard.
+#'
+#' * `overview`: an Overview tab, shown first, from either `html_path` (an
+#'   HTML file) or `ui` (a function returning Shiny UI).
+#' * `startup_modal`: a [shiny::modalDialog()] shown when a session starts,
+#'   e.g. a disclaimer.
+#' * `response_notes`: footnotes added to charts whenever a given model (and,
+#'   optionally, a given variable) is plotted, e.g. to flag a caveat. A data
+#'   frame with columns `model_name`, `note` and, optionally, `display_name`.
+#' * `header_links`: buttons under the title linking to web pages, as a named
+#'   character vector of URLs named by button label.
+#' * `r_slider_range`, `r_slider_step`, `cr_button_step`: the Alternative
+#'   Policy Paths sliders' range either side of the baseline, step, and the
+#'   step of their plus/minus buttons, in the policy rate's units.
+#' * `baseline_upload_source_models`, `default_baseline_upload_source_model`,
+#'   `allow_display_name_upload`: which models users can choose to translate
+#'   an uploaded baseline written in model codes, and whether they can upload
+#'   one already in display names.
+#' * `help`: `help$anticipated_shocks`, a function returning a
+#'   [shiny::modalDialog()] for Alternative Policy Paths' help buttons.
+#' * `plotters`: the plotting styles offered, from `"ggplot"` (the default)
+#'   and `"ggrba"` (RBA style, which needs the internal `ggrba` package).
+#' * `dictionary`: settings for a Variable Dictionary tab, which isn't shown
+#'   at present.
+#'
+#' @param models Named list of models, each from [read_dynare()] or
+#'   [custom_moo()]; the names are the labels shown. See "What you must supply" below.
+#' @param timeline List of quarterly dates `data_start`, `forecast_start`,
+#'   `forecast_end` and `data_end` (each the first day of a quarter's last
+#'   month), and optionally `hsd_data_start`. See "What you must supply" below.
+#' @param baselines Named list of baselines from [import_baseline()], each
+#'   covering `data_start` to `forecast_end`. See "What you must supply" below.
 #' @param default_baseline Name of the baseline selected initially.
-#' @param instrument_display_name Display name of the policy instrument.
-#' @param instrument_shock_name Display name or code of the instrument shock.
-#' @param r_slider_range Distance around a baseline level shown by each slider.
-#' @param r_slider_step Slider increment.
-#' @param cr_button_step Increment used by slider plus/minus controls.
-#' @param baseline_upload_source_models Configured model labels available for
-#'   translating uploaded source-native baselines.
-#' @param default_baseline_upload_source_model Initial source model for uploads.
-#' @param allow_display_name_upload Whether users may declare an upload already
-#'   uses canonical display-name columns.
-#' @param irf Curated Scenario Mode IRF data and defaults. Scenario data must
-#'   include one scenario-group label per row in `scenario`; only the
-#'   composition root that computes curated scenarios should build this data.
-#'   Custom IRF targets always use displayed IRF units.
-#' @param overview Overview HTML or UI callback configuration.
-#' @param hsd Historical shock-decomposition configuration. `hsd$preamble_ui`
-#'   is an optional function returning UI shown above the HSD chart; `NULL`
-#'   (the default) shows no preamble.
-#' @param alt_paths Alternative Policy Paths model-selection configuration.
-#'   `alt_paths$models` is the eligible model allow-list offered by the tab's
-#'   model selector (defaults to every configured model); `alt_paths$defaults$models`
-#'   is the selector's initial selection (defaults to every eligible model).
-#'   `alt_paths$defaults$display_names` sets the initially plotted response
-#'   variables (defaults to `irf$defaults$display_names`), and
-#'   `alt_paths$defaults$lambda` the initial cognitive-discounting
-#'   (anticipation) parameter (defaults to 0.8).
-#' @param dictionary Variable Dictionary model-selection configuration.
-#'   `dictionary$models` is the eligible model allow-list offered by the tab's
-#'   model selector (defaults to every configured model); `dictionary$defaults$models`
-#'   is the selector's initial selection (defaults to every eligible model).
-#' @param response_notes Optional data frame of reviewed footnote caveats shown
-#'   in the IRF Library and Alternative Policy Paths tabs, with columns
-#'   `model_name` (a configured model label), `note` (the footnote text), and
-#'   optionally `display_name` (a response variable's display name; `NA` or
-#'   omitted applies the note whenever that model appears at all). `NULL`
-#'   (the default) shows no response-note footnotes.
-#' @param optimal_policy Optional policy-module configuration. When enabled,
-#'   supplies model roles, a separate policy horizon, explicit instrument codes,
-#'   baseline preparation/extension functions, the variables the tab offers,
-#'   timeless-policy vintages, and optional composition-supplied UI hooks.
-#'   `loss_variable_choices` and `constraint_variable_choices` are character
-#'   vectors of the variables offered as loss-function variables and as
-#'   constraint (bound) variables, e.g. `c("Inflation", "Output")`. Use
-#'   display names so one list works across models; dynare codes also work.
-#'   The tab labels each choice with its value. Optionally, name an element to
-#'   give it a different label, e.g. `c("Output gap" = "Output", "Inflation")`.
-#'   `loss_variable_vintages` (optional) makes the tab's Commitment strategy
-#'   timeless commitment, re-solved from a past commitment start; without it,
-#'   Commitment is ordinary commitment from the forecast start and the tab has
-#'   no commitment-start control. It is a data frame of past baselines: `vintage` and
-#'   `date` columns plus one `<loss variable>_gap_loss` column per loss
-#'   variable, named by the variable's value in `loss_variable_choices`
-#'   (e.g. `Inflation_gap_loss`), holding its gap from the target as it stood
-#'   at the time, in baseline units. The ELB option also needs the
-#'   instrument's level, in a column named like `instrument_variable`. See
-#'   [get_policy_scenario()] for the full format. UI hooks: `help` (named list of modal-
-#'   returning functions keyed by `cd`, `strategy`, `loss_variables`,
-#'   `loss_horizon`, `instrument_horizon`, `constraints`, `commitment_start`;
-#'   missing keys show a generic fallback modal), `description_ui` (function
-#'   returning the tab's introductory UI; a generic placeholder is used when
-#'   unset), `loss_variable_defaults` (named numeric target defaults), and
-#'   `loss_variable_weight_defaults` (named numeric weight defaults; unlisted
-#'   loss variables default to a weight of 1).
-#' @param help Optional top-level contextual-help configuration used outside
-#'   the Optimal Policy tab. `help$anticipated_shocks` is an optional function
-#'   returning UI from [shiny::modalDialog()] for Alternative Policy Paths'
-#'   anticipated-shock and cognitive-discounting help buttons; a generic
-#'   fallback modal is shown when unset.
-#' @param startup_modal Optional UI returned by [shiny::modalDialog()] to show
-#'   once when a session starts.
-#' @param header_links Optional named character vector of links shown as
-#'   buttons under the dashboard title, e.g.
-#'   `c("Read the whitepaper" = "https://...")`. Names are the
-#'   button labels, and each button opens its link in a new browser tab. `NULL` (the
-#'   default) shows no links.
-#' @param plotters Character vector naming the plotting backends this
-#'   dashboard offers, from `c("ggrba", "ggplot")`. Explicit and static - not
-#'   detected from installed packages - so a deployment controls exactly
-#'   which backends are offered regardless of what happens to be installed
-#'   on the server. The "Plot style" control is shown only when more than one
-#'   backend is configured; `"ggrba"` is preselected when both are available.
-#'   Defaults to `"ggplot"` only, so the dashboard - and `ezdyn` generally -
-#'   keeps working without the optional, internal-only `ggrba` package in a
-#'   more public context. Supply `c("ggrba", "ggplot")` for a deployment that
-#'   should also offer RBA-styled charts.
+#' @param hsd Historical Shock Decompositions settings: a list with any of
+#'   `models`, `display_names`, `shock_group` and `preamble_ui`. See
+#'   "Historical Shock Decompositions" below.
+#' @param optimal_policy Optimal Policy settings, or `NULL` (the default) for
+#'   no Optimal Policy tab. A list that needs `forecast_end`,
+#'   `loss_variable_choices` and `constraint_variable_choices`, and usually
+#'   `instrument_variable` and `instrument_shock`. See "Optimal Policy" below.
+#' @param alt_paths Alternative Policy Paths settings: a list with any of
+#'   `models` and `defaults` (`models`, `display_names`, `lambda`). See
+#'   "Alternative Policy Paths" below.
+#' @param irf Impulse Response Library settings: a list with any of
+#'   `defaults` (`models`, `display_names`, `target_display_name`, `shock`,
+#'   `horizon`, `use_cd`, `lambda`) and `scenarios`. See "Impulse Response Library" below.
+#' @param overview Overview tab content: a list with `html_path` (an HTML
+#'   file) or `ui` (a function returning UI). No Overview tab by default.
+#' @param startup_modal A [shiny::modalDialog()] shown once when a session
+#'   starts, or `NULL` (the default) for none.
+#' @param response_notes Chart footnotes for particular models and variables:
+#'   a data frame with columns `model_name`, `note` and, optionally,
+#'   `display_name` (`NA` or omitted applies the note whenever the model is
+#'   plotted). Shown in the Impulse Response Library and Alternative Policy
+#'   Paths tabs. `NULL` (the default) for none.
+#' @param name Dashboard title.
+#' @param instrument_display_name Display name of the policy rate in your
+#'   models. See "Two settings to check" below.
+#' @param instrument_shock_name Description (or code) of the monetary policy
+#'   shock in your models. See "Two settings to check" below.
+#' @param r_slider_range Alternative Policy Paths sliders' range either side
+#'   of the baseline, in the policy rate's units.
+#' @param r_slider_step Alternative Policy Paths sliders' step.
+#' @param cr_button_step Step of the sliders' plus/minus buttons.
+#' @param baseline_upload_source_models Models users can choose to translate
+#'   an uploaded baseline written in model codes (default: all).
+#' @param default_baseline_upload_source_model The model initially chosen for
+#'   that (default: the first).
+#' @param allow_display_name_upload Whether users can upload a baseline
+#'   already in display names and units (default `TRUE`).
+#' @param dictionary Variable Dictionary settings: a list with `models` and
+#'   `defaults$models`. The tab isn't shown at present.
+#' @param help Help for Alternative Policy Paths: a list with
+#'   `anticipated_shocks`, a function returning a [shiny::modalDialog()]. A
+#'   generic message is shown by default. (Optimal Policy's help is set in
+#'   `optimal_policy$help`.)
+#' @param header_links Buttons under the title linking to web pages: a named
+#'   character vector of URLs, named by button label, e.g.
+#'   `c("Read the paper" = "https://...")`. `NULL` (the default) for none.
+#' @param plotters Plotting styles offered, from `"ggplot"` (the default)
+#'   and `"ggrba"`. The style control is shown only when there are both;
+#'   `"ggrba"` needs the internal `ggrba` package.
 #'
-#' @return An object of class `ezdyn_dashboard_config`.
+#' @return An `ezdyn_dashboard_config` object, to pass to
+#'   [ezdyn_dashboard()].
 #'
+#' @seealso [ezdyn_dashboard()] to build the app; [read_dynare()],
+#'   [custom_moo()] and [import_baseline()] to prepare its inputs;
+#'   [get_policy_scenario()] for Optimal Policy's calculation and vintage
+#'   format.
+#'
+#' @examples
+#' \dontrun{
+#' # 1. A minimal dashboard: one estimated model and one baseline -----------
+#' sw <- read_dynare(
+#'   path = "inputs/SW_2007_45.json",
+#'   path_meta = "inputs/variable_metadata.xlsx",
+#'   model_name = "Smets Wouters (2007)",
+#'   colour = "forestgreen"
+#' )
+#' models <- list("Smets Wouters (2007)" = sw)
+#' baseline <- import_baseline("inputs/baseline.xlsx", source_model = sw, models = models)
+#' timeline <- list(
+#'   data_start = as.Date("2010-03-01"),
+#'   forecast_start = as.Date("2026-09-01"),
+#'   forecast_end = as.Date("2028-12-01"),
+#'   data_end = as.Date("2028-12-01")
+#' )
+#'
+#' config <- configure_dashboard(
+#'   models = models,
+#'   timeline = timeline,
+#'   baselines = list("Baseline forecast" = baseline),
+#'   default_baseline = "Baseline forecast",
+#'   # Match the models' names for the policy rate and its shock (see "Two settings to check")
+#'   instrument_display_name = "Nominal Interest Rate",
+#'   instrument_shock_name = "Monetary policy shock"
+#' )
+#' shiny::runApp(ezdyn_dashboard(config))
+#'
+#' # 2. Several models, with tab defaults set --------------------------------
+#' var <- custom_moo(
+#'   irf = read.csv("inputs/var_irfs.csv"),
+#'   model_name = "My VAR",
+#'   meta = "inputs/var_metadata.xlsx",
+#'   colour = "firebrick"
+#' )
+#' models <- list("Smets Wouters (2007)" = sw, "My VAR" = var)
+#' plotted <- c("Inflation (year-ended)", "Output Growth (year-ended)", "Nominal Interest Rate")
+#'
+#' config <- configure_dashboard(
+#'   models = models,
+#'   timeline = timeline,
+#'   baselines = list("Baseline forecast" = baseline),
+#'   default_baseline = "Baseline forecast",
+#'   hsd = list(display_names = "Inflation", shock_group = "Demand/Supply/Monetary"),
+#'   alt_paths = list(defaults = list(models = "Smets Wouters (2007)", display_names = plotted)),
+#'   irf = list(defaults = list(display_names = c("Nominal Interest Rate", "Inflation"), horizon = 20)),
+#'   name = "My Dashboard",
+#'   instrument_display_name = "Nominal Interest Rate",
+#'   instrument_shock_name = "Monetary policy shock"
+#' )
+#'
+#' # 3. Adding the Optimal Policy tab -----------------------------------------
+#' # The baseline must run to `optimal_policy$forecast_end`, so here it (and
+#' # `data_end`) runs ten years past the Alternative Paths window.
+#' timeline$data_end <- as.Date("2038-06-01")
+#' # Optional past baselines for timeless commitment (see "Optimal Policy" below), e.g.
+#' # as built by the package repository's dashboard_example/build_us_baseline.R
+#' vintages <- readxl::read_excel("inputs/us_vintages.xlsx", sheet = "vintages")
+#'
+#' config <- configure_dashboard(
+#'   models = models,
+#'   timeline = timeline,
+#'   baselines = list("Baseline forecast" = baseline),
+#'   default_baseline = "Baseline forecast",
+#'   optimal_policy = list(
+#'     forecast_end = timeline$data_end,
+#'     instrument_variable = "Nominal Interest Rate",
+#'     instrument_shock = "Monetary policy shock",
+#'     loss_variable_choices = c("Inflation", "Output Growth", "Nominal Interest Rate Changes"),
+#'     constraint_variable_choices = c("Nominal Interest Rate", "Inflation"),
+#'     default_response_variables = plotted,
+#'     default_loss_variables = c("Inflation", "Output Growth"),
+#'     # Targets in the variables' units: 2% a year inflation is 0.5 a quarter
+#'     loss_variable_defaults = c("Inflation" = 0.5, "Output Growth" = 0.45),
+#'     # Offer anticipated policy shocks, for models that have them
+#'     use_cd = TRUE,
+#'     lambda = 0.8,
+#'     # Optional: past baselines, for timeless commitment
+#'     loss_variable_vintages = vintages,
+#'     preloss_start = min(vintages$vintage)
+#'   ),
+#'   instrument_display_name = "Nominal Interest Rate",
+#'   instrument_shock_name = "Monetary policy shock"
+#' )
+#'
+#' # 4. Optional extras ----------------------------------------------------------
+#' config <- configure_dashboard(
+#'   models = models,
+#'   timeline = timeline,
+#'   baselines = list("Baseline forecast" = baseline),
+#'   default_baseline = "Baseline forecast",
+#'   overview = list(html_path = "overview.html"),
+#'   startup_modal = shiny::modalDialog(title = "Welcome", "Results are indicative only."),
+#'   response_notes = data.frame(
+#'     model_name = "My VAR",
+#'     display_name = NA,
+#'     note = "Estimated over 1990-2019."
+#'   ),
+#'   header_links = c("Read the paper" = "https://example.com/paper.pdf"),
+#'   instrument_display_name = "Nominal Interest Rate",
+#'   instrument_shock_name = "Monetary policy shock"
+#' )
+#' }
+#'
+#' @md
 #' @export
 configure_dashboard <- function(
-    name = "ezdyn Dashboard",
     models,
     timeline,
     baselines,
     default_baseline,
+    hsd = list(),
+    optimal_policy = NULL,
+    alt_paths = list(),
+    irf = list(),
+    overview = list(),
+    startup_modal = NULL,
+    response_notes = NULL,
+    name = "ezdyn Dashboard",
     instrument_display_name = "Cash Rate",
     instrument_shock_name = "Monetary policy shock",
     r_slider_range = 3,
@@ -727,15 +1105,8 @@ configure_dashboard <- function(
     baseline_upload_source_models = names(models),
     default_baseline_upload_source_model = NULL,
     allow_display_name_upload = TRUE,
-    irf = list(),
-    overview = list(),
-    hsd = list(),
-    alt_paths = list(),
     dictionary = list(),
-    response_notes = NULL,
-    optimal_policy = NULL,
     help = list(),
-    startup_modal = NULL,
     header_links = NULL,
     plotters = "ggplot") {
   if (!is.character(name) || length(name) != 1 || is.na(name) || name == "") {
