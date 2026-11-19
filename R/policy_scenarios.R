@@ -11,7 +11,9 @@
 #' @param policy_strategy Named list with `output_name`, `output_variables`,
 #'   `loss_variables`, `loss_weights`, `discount_factor`, `T_loss`,
 #'   `T_instrument`, and `commit` (`"commit"`, `"timeless"`, or `"disc"`).
-#'   Optional `instrument_variable` and `instrument_shock` identify the model's
+#'   Discretion (`"disc"`) needs `T_loss >= T_instrument`: the policymaker
+#'   re-optimises in each instrument period, against the loss from then to
+#'   `T_loss`. Optional `instrument_variable` and `instrument_shock` identify the model's
 #'   policy instrument and innovation. Variable entries (`output_variables`,
 #'   `loss_variables`, `instrument_variable`, and constraint `variable`s) may
 #'   be display names or dynare codes, resolved against `model`; a trailing
@@ -66,6 +68,7 @@ get_policy_scenario <- function(
   if (T_loss < 1 || T_instrument < 1 || T_loss > T || T_instrument > T) {
     stop("Policy loss and instrument horizons must be positive and within the supplied forecast horizon.", call. = FALSE)
   }
+  if (commit == "disc") ezdyn_validate_discretion_horizons(T_loss, T_instrument)
 
   # 1. Resolve output/loss/instrument/constraint variables and the instrument
   # shock to this model's own dynare codes. Identifiers may be display names,
@@ -664,13 +667,35 @@ ezdyn_policy_discretion_constraints <- function(constraints, dY) {
   list(C_ineq = C_ineq, b_ineq = b_ineq)
 }
 
+# Discretion re-optimises in each instrument period against the loss from that
+# period on, so every instrument period must fall within the loss horizon. A
+# longer loss horizon is fine: the last policymakers just look further ahead.
+ezdyn_validate_discretion_horizons <- function(T_loss, T_instrument) {
+  if (T_loss < T_instrument) {
+    stop(sprintf(
+      paste(
+        "Discretion needs a loss horizon at least as long as the instrument (optimisation) horizon,",
+        "but the loss horizon is %d and the instrument horizon is %d. A discretionary policymaker",
+        "re-optimises each quarter against the loss from that quarter on, so the policy set in",
+        "quarters %d to %d would have no loss left to minimise. Lengthen the loss horizon or",
+        "shorten the instrument horizon."
+      ),
+      T_loss, T_instrument, T_loss + 1L, T_instrument
+    ), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# Solve discretionary policy by backward induction over the `instruments`
+# policy periods. The policymaker in period p sets that period's instrument
+# against the loss over periods p to `horizon`, taking the reactions of the
+# later policymakers (p + 1 to `instruments`) as given. The loss horizon may
+# exceed the instrument horizon.
 ezdyn_policy_discretion <- function(Y0, dY, weights, discount_factor, constraints) {
   n_variables <- dim(dY)[1]
   horizon <- dim(dY)[2]
   instruments <- dim(dY)[3]
-  if (instruments != horizon) {
-    stop("Discretionary policy requires equal loss and instrument horizons.", call. = FALSE)
-  }
+  ezdyn_validate_discretion_horizons(horizon, instruments)
   response_long <- matrix(dY, nrow = n_variables * horizon, ncol = instruments)
   C_long <- matrix(0, 0, n_variables * horizon)
   b_long <- numeric()
@@ -695,11 +720,12 @@ ezdyn_policy_discretion <- function(Y0, dY, weights, discount_factor, constraint
 
     for (period in rev(seq_len(instruments))) {
       remaining_horizon <- horizon - period + 1
+      remaining_instruments <- instruments - period + 1
       effects <- ((period - 1) * n_variables + 1):(n_variables * horizon)
       response <- matrix(
-        dY[, seq_len(remaining_horizon), seq_len(remaining_horizon), drop = FALSE],
+        dY[, seq_len(remaining_horizon), seq_len(remaining_instruments), drop = FALSE],
         nrow = n_variables * remaining_horizon,
-        ncol = remaining_horizon
+        ncol = remaining_instruments
       )
       current_response <- response[, 1, drop = FALSE]
       if (period == instruments) {
