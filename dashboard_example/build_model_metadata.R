@@ -21,16 +21,19 @@
 # (ezdyn's `validate_display_names()` only errors when the SAME display name
 # is used with DIFFERENT units across models).
 #
-# Every model provides the same six common variables: "Inflation",
+# Every model provides the same eight common variables: "Inflation",
 # "Inflation (year-ended)", "Nominal Interest Rate", "Nominal Interest Rate
-# (quarterly)", "Hours Worked" and "Output". Where a model's own variable has
-# a different name (e.g. "Price Inflation"), a derived alias row
-# (`derived_from`, no transform) adds the common name alongside it.
-# "Inflation (year-ended)" is the four-quarter sum of each model's quarterly
-# inflation. "Nominal Interest Rate" is each model's quarterly nominal rate
-# annualised (x 4), and "Nominal Interest Rate (quarterly)" is the quarterly
-# rate itself. See README.md ("Common variables") for how each model gets
-# each variable.
+# (quarterly)", "Nominal Interest Rate Changes", "Hours Worked", "Output" and
+# "Output Growth". Where a model's own variable has a different name (e.g.
+# "Price Inflation"), a derived alias row (`derived_from`, no transform) adds
+# the common name alongside it. "Inflation (year-ended)" is the four-quarter
+# sum of each model's quarterly inflation. "Nominal Interest Rate" is each
+# model's quarterly nominal rate annualised (x 4), "Nominal Interest Rate
+# (quarterly)" is the quarterly rate itself, and "Nominal Interest Rate
+# Changes" is the quarterly change in the annualised rate. "Output Growth" is
+# the quarterly change in "Output", for models without their own (SW and
+# Ireland have one). See README.md ("Common variables") for how each model
+# gets each variable.
 #
 # The `alt_paths`, `irf` and `hsd` columns choose which dashboard tabs offer
 # a variable (Alternative Paths, the Impulse Response Library, Historical
@@ -52,7 +55,7 @@ unit_symbol_cols <- function(units) {
   irf <- case_when(
     is_rate ~ "ppt",
     units == "Per cent deviation from steady state" ~ "% dev",
-    units == "Percentage points deviation from steady state" ~ "ppt"
+    grepl("^Percentage points", units) ~ "ppt"
   )
   if (anyNA(irf)) {
     stop("No unit symbols for units: ", paste(unique(units[is.na(irf)]), collapse = ", "))
@@ -102,17 +105,38 @@ annualise <- function(df, rates, own_scale = NULL) {
 
 # Show the model's quarterly nominal rate `rate` annualised, as "Nominal
 # Interest Rate". A derived "Nominal Interest Rate (quarterly)" row scales it
-# back by 1/4 (applied after the rate's own scale factor).
+# back by 1/4 (applied after the rate's own scale factor). A derived "Nominal
+# Interest Rate Changes" row is the quarterly change in the annualised rate
+# (the rate's own x 4 applies first, so it needs no scaling of its own), e.g.
+# for an interest-rate-smoothing term in Optimal Policy's loss function. It is
+# kept off the Alternative Paths picker.
 annualise_rate <- function(df, rate, own_scale = NULL) {
   df |>
     annualise(rate, own_scale) |>
     insert_after(rate, tibble(
-      dynare_name = paste0(rate, "_q"),
-      display_name = "Nominal Interest Rate (quarterly)",
-      units = "Per cent (quarterly)",
-      scale_formula = "0.25",
-      derived_from = rate
+      dynare_name = paste0(rate, c("_q", "_change")),
+      display_name = c("Nominal Interest Rate (quarterly)", "Nominal Interest Rate Changes"),
+      units = c("Per cent (quarterly)", "Percentage points (annualized)"),
+      scale_formula = c("0.25", NA),
+      derived_from = rate,
+      derived_transform = c(NA, "diff"),
+      alt_paths = c(NA, FALSE)
     ))
+}
+
+# "Output Growth": the quarterly change in the model's output `output` (the
+# `diff` transform), for models without an output growth variable of their
+# own. It is the deviation of output growth from trend, as SW's `dy` is
+# (`dy = y - y(-1)` plus a constant trend), so the two share a display name.
+# `output` must be a model variable, not an alias row.
+output_growth_row <- function(output) {
+  tibble(
+    dynare_name = paste0(output, "_growth"),
+    display_name = "Output Growth",
+    units = "Per cent (quarterly)",
+    derived_from = output,
+    derived_transform = "diff"
+  )
 }
 
 # A common display name for an existing model variable `source`.
@@ -268,6 +292,7 @@ gali2015ch3_variables <- tribble(
 ) |>
   annualise_rate("i") |>
   annualise(c("r_real", "r_nat")) |>
+  insert_after("y", output_growth_row("y")) |>
   insert_after("pi", year_ended_inflation_row("pi")) |>
   common_cols()
 
@@ -300,6 +325,7 @@ gali2015ch6_variables <- tribble(
 ) |>
   annualise_rate("i") |>
   annualise(c("r_real", "r_nat")) |>
+  insert_after("y", output_growth_row("y")) |>
   # Price inflation is the model's inflation rate (wage inflation is separate).
   insert_after("pi_p", alias_row("inflation", "Inflation", "Per cent (quarterly)", "pi_p")) |>
   insert_after("inflation", year_ended_inflation_row("pi_p")) |>
@@ -334,6 +360,7 @@ gali2015ch8_variables <- tribble(
 ) |>
   annualise_rate("i") |>
   annualise(c("r_real", "r_nat")) |>
+  insert_after("y", output_growth_row("y")) |>
   insert_after("pi", year_ended_inflation_row("pi")) |>
   # `n` is the same hours input as Ch.3's "Hours Worked" (both use the
   # production function y = a + (1 - alpha) * n).
@@ -361,7 +388,10 @@ gali2010_variables <- tribble(
   "y_gap",        "Output",                         "Per cent deviation from steady state",
   "nhat",         "Employment",                     "Per cent deviation from steady state",
   "fhat",         "Labor Force",                    "Per cent deviation from steady state",
-  "urhat",        "Unemployment Rate",              "Percentage points deviation from steady state",
+  # A rate like the interest rate: the model's deviation from steady state
+  # moves it in percentage points, around a baseline in per cent (the US
+  # unemployment rate in the dashboard).
+  "urhat",        "Unemployment Rate",              "Per cent (of the labour force)",
   "hatw_real",    "Real Wage",                      "Per cent deviation from steady state",
   "mu_hat",       "Price Markup",                   "Per cent deviation from steady state",
   "a",            "Technology Shock Process",       "Per cent deviation from steady state",
@@ -369,6 +399,7 @@ gali2010_variables <- tribble(
 ) |>
   annualise_rate("ihat") |>
   annualise("rhat") |>
+  insert_after("y_gap", output_growth_row("y_gap")) |>
   insert_after("pi_p", alias_row("inflation", "Inflation", "Per cent (quarterly)", "pi_p")) |>
   insert_after("inflation", year_ended_inflation_row("pi_p")) |>
   # The model has no hours-per-worker margin (employment is the only labour
@@ -439,6 +470,7 @@ ascari_variables <- tribble(
   # before annualising.
   annualise_rate("i", own_scale = "i_bar") |>
   annualise("real_interest") |>
+  insert_after("y", output_growth_row("y")) |>
   insert_after("pi", year_ended_inflation_row("pi")) |>
   common_cols()
 
@@ -471,6 +503,7 @@ bp2018mp_variables <- tribble(
 ) |>
   annualise_rate("i") |>
   annualise(c("r_real", "r_nat")) |>
+  insert_after("y", output_growth_row("y")) |>
   insert_after("pi_p", alias_row("inflation", "Inflation", "Per cent (quarterly)", "pi_p")) |>
   insert_after("inflation", year_ended_inflation_row("pi_p")) |>
   common_cols()

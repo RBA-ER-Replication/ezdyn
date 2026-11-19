@@ -42,7 +42,19 @@ dynare code or its display name.}
 
 \item{forecast_end}{Final forecast quarter.}
 
-\item{loss_variable_vintages}{Optional long history for timeless commitment.}
+\item{loss_variable_vintages}{Past baselines for timeless commitment
+(`commit = "timeless"`), as a long data frame: a `vintage` column (the
+quarter each baseline was made in, its first forecast quarter), a `date`
+column, and one `<loss variable>_gap_loss` column per loss variable, e.g.
+`Inflation_gap_loss`. Each gap is the loss variable minus its target as
+it stood at the time, in the same units as `baseline`; the loss squares
+it. `<loss variable>` is named as in `loss_variables` (without the
+suffix), by its display name or `model`'s own dynare code, so display
+names let one table serve every model. A historical constraint (e.g. the
+ELB) also needs the instrument's level, in a column named like
+`instrument_variable`. Each vintage runs from its own quarter to at least
+`T_loss` quarters after `forecast_start`, and vintages are needed for
+every quarter from `preloss_start` to the one before `forecast_start`.}
 
 \item{preloss_start}{First historical commitment quarter for timeless policy.}
 

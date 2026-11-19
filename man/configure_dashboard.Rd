@@ -95,8 +95,22 @@ omitted applies the note whenever that model appears at all). `NULL`
 
 \item{optimal_policy}{Optional policy-module configuration. When enabled,
 supplies model roles, a separate policy horizon, explicit instrument codes,
-baseline preparation/extension functions, timeless-policy vintages, and
-optional composition-supplied UI hooks: `help` (named list of modal-
+baseline preparation/extension functions, the variables the tab offers,
+timeless-policy vintages, and optional composition-supplied UI hooks.
+`loss_variable_choices` and `constraint_variable_choices` are character
+vectors of the variables offered as loss-function variables and as
+constraint (bound) variables, e.g. `c("Inflation", "Output")`. Use
+display names so one list works across models; dynare codes also work.
+The tab labels each choice with its value. Optionally, name an element to
+give it a different label, e.g. `c("Output gap" = "Output", "Inflation")`.
+`loss_variable_vintages` (needed for the tab's Commitment strategy, which
+is timeless commitment) is a data frame of past baselines: `vintage` and
+`date` columns plus one `<loss variable>_gap_loss` column per loss
+variable, named by the variable's value in `loss_variable_choices`
+(e.g. `Inflation_gap_loss`), holding its gap from the target as it stood
+at the time, in baseline units. The ELB option also needs the
+instrument's level, in a column named like `instrument_variable`. See
+[get_policy_scenario()] for the full format. UI hooks: `help` (named list of modal-
 returning functions keyed by `cd`, `strategy`, `loss_variables`,
 `loss_horizon`, `instrument_horizon`, `constraints`, `commitment_start`;
 missing keys show a generic fallback modal), `description_ui` (function

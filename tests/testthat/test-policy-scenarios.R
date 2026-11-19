@@ -367,3 +367,91 @@ testthat::test_that("the same display-name policy_strategy and baseline run agai
   testthat::expect_setequal(actual_a$display_name, c("Cash Rate", "Inflation"))
   testthat::expect_setequal(actual_b$display_name, c("Cash Rate", "Inflation"))
 })
+
+# A timeless-commitment setup shared by two models with different codes: a
+# display-name baseline with its own gap column, and one past vintage
+# (2023-12-01) keyed by display names.
+policy_timeless_fixture <- function() {
+  dates <- seq(as.Date("2024-03-01"), by = "quarter", length.out = 4)
+  baseline <- data.frame(date = dates, `Cash Rate` = 4, `Inflation` = 3, check.names = FALSE)
+  baseline[["Inflation_gap_loss"]] <- baseline[["Inflation"]] - 2.5
+  vintage_dates <- seq(as.Date("2023-12-01"), by = "quarter", length.out = 5)
+  list(
+    dates = dates,
+    baseline = baseline,
+    vintages = data.frame(
+      vintage = as.Date("2023-12-01"), date = vintage_dates,
+      `Inflation_gap_loss` = c(1, 0.8, 0.6, 0.4, 0.2), `Cash Rate` = 4,
+      check.names = FALSE
+    ),
+    strategy = list(
+      output_name = "Commitment", output_variables = c("Cash Rate", "Inflation"), loss_variables = "Inflation_gap_loss",
+      loss_weights = 1, discount_factor = 0.99, T_loss = 3L, T_instrument = 3L, instrument_variable = "Cash Rate",
+      instrument_shock = "Monetary policy shock", commit = "timeless"
+    )
+  )
+}
+
+testthat::test_that("timeless commitment reads display-name `_gap_loss` vintages for models with different codes", {
+  fixture <- policy_timeless_fixture()
+  run <- function(model) {
+    get_policy_scenario(
+      fixture$strategy, fixture$baseline, model,
+      forecast_start = fixture$dates[[1]], forecast_end = fixture$dates[[4]],
+      loss_variable_vintages = fixture$vintages, preloss_start = as.Date("2023-12-01")
+    )
+  }
+
+  actual_a <- run(policy_fixture_model(c("r_obs", "infl_obs"), "eps_r"))
+  actual_b <- run(policy_fixture_model(c("cr", "pi"), "eps_mp"))
+
+  testthat::expect_setequal(unique(actual_a$path_name), c("Baseline", "Commitment"))
+  testthat::expect_equal(actual_a$value, actual_b$value)
+})
+
+testthat::test_that("timeless commitment's history holds the display-name vintages' gaps under the model's codes", {
+  fixture <- policy_timeless_fixture()
+  model <- policy_fixture_model(c("cr", "pi"), "eps_mp")
+  originals <- list(pi_gap_loss = "Inflation_gap_loss", cr = "Cash Rate")
+
+  vintages <- ezdyn_policy_vintages(fixture$vintages, "pi_gap_loss", "cr", TRUE, originals, model$M_)
+  history <- ezdyn_policy_history(
+    vintages, "pi_gap_loss", as.Date("2023-12-01"), as.Date("2024-03-01"), 3,
+    matrix(c(0.5, 0.5, 0.5), nrow = 1, dimnames = list("pi_gap_loss", NULL))
+  )
+
+  testthat::expect_true(all(c("pi_gap_loss", "cr") %in% names(vintages)))
+  # The 2023-12-01 vintage over 2023-12-01 to 2024-09-01, then the current
+  # (2024-03-01) baseline's gaps from its first quarter.
+  testthat::expect_equal(unname(history["pi_gap_loss", , 1]), c(1, 0.8, 0.6, 0.4))
+  testthat::expect_equal(unname(history["pi_gap_loss", 2:4, 2]), c(0.5, 0.5, 0.5))
+})
+
+testthat::test_that("timeless commitment names the vintage columns it is missing", {
+  fixture <- policy_timeless_fixture()
+  model <- policy_fixture_model(c("r_obs", "infl_obs"), "eps_r")
+  run <- function(strategy, vintages) {
+    get_policy_scenario(
+      strategy, fixture$baseline, model,
+      forecast_start = fixture$dates[[1]], forecast_end = fixture$dates[[4]],
+      loss_variable_vintages = vintages, preloss_start = as.Date("2023-12-01")
+    )
+  }
+
+  # A level column is not a gap column.
+  levels_only <- fixture$vintages
+  names(levels_only)[names(levels_only) == "Inflation_gap_loss"] <- "Inflation"
+  testthat::expect_error(run(fixture$strategy, levels_only), "`Inflation_gap_loss` (one `<loss variable>_gap_loss` column per loss variable", fixed = TRUE)
+  testthat::expect_error(run(fixture$strategy, NULL), "needs loss-variable vintages.*`Inflation_gap_loss`")
+
+  # The instrument's level is only needed for a historical (ELB) constraint.
+  no_rate <- fixture$vintages[setdiff(names(fixture$vintages), "Cash Rate")]
+  testthat::expect_no_error(run(fixture$strategy, no_rate))
+  elb <- fixture$strategy
+  elb$constraints <- list(list(direction = "lower", variable = "Cash Rate", period = 1:3, value = 0.1, historical = TRUE))
+  testthat::expect_error(run(elb, no_rate), "`Cash Rate` (the instrument's level", fixed = TRUE)
+  testthat::expect_no_error(run(elb, fixture$vintages))
+
+  short <- fixture$vintages[fixture$vintages$date <= as.Date("2024-03-01"), ]
+  testthat::expect_error(run(fixture$strategy, short), "vintage 2023-12-01 is incomplete: `Inflation_gap_loss` must cover every quarter from 2023-12-01 to 2024-09-01")
+})

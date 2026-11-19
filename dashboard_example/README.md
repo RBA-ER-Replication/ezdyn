@@ -104,14 +104,16 @@ needed.
 `build_us_baseline.R` builds the dashboard's US data from
 [FRED](https://fred.stlouisfed.org/): history for Smets-Wouters' seven
 observables, extended with the medians from the Fed's latest Summary of
-Economic Projections (SEP). `inputs/us_baseline.xlsx` has four sheets:
+Economic Projections (SEP). `inputs/us_baseline.xlsx` has six sheets:
 
 | Sheet | Contents | Used by |
 |---|---|---|
-| `baseline` | History and forecast in dashboard units: headline growth rates, hours relative to their long-run level | The dashboard baseline |
+| `baseline` | History and forecast in dashboard units: headline growth rates, hours relative to their long-run level, and the unemployment rate (`unemployment`) | The dashboard baseline; the unemployment rate is its "Unemployment Rate" (Gali Unemployment (2010)) |
 | `model_data` | The same data in Smets-Wouters' own definitions: per-person growth rates, demeaned hours | Re-running SW over current data and forecasts (e.g. for shock decompositions) |
 | `timeline` | `data_start`, `data_end`, `forecast_start`, `forecast_end` | The dashboard timeline |
-| `vintages` | `baseline` as known in each of the last 12 quarters | Optimal Policy's timeless commitment |
+| `targets` | The current loss-function targets in dashboard units: inflation 0.5% a quarter (2% a year), unemployment and output growth at the latest SEP longer-run rates, no rate change | The Optimal Policy tab's default targets |
+| `vintages` | Loss-function gaps (each variable less its target at the time) in each of the last 12 quarters' baselines, in dashboard units | Optimal Policy's timeless commitment |
+| `vintage_levels` | `baseline` as known in each of the last 12 quarters, plus the unemployment rate and the Fed's NAIRU estimate | The source of `vintages` |
 
 Quarters are dated the first day of their last month (Q3 = `YYYY-09-01`).
 Growth rates are quarterly log changes x 100, not annualised. The sheets store
@@ -201,13 +203,43 @@ For series the SEP doesn't cover:
 
 Timeless commitment assumes the Fed committed to its policy in some past
 quarter (the tab's "Commitment start"). It re-solves each quarter since then
-using the baseline as it looked at the time. The `vintages` sheet holds one
-such baseline for each of the last 12 quarters (`vintage_quarters` in the
+using the baseline as it looked at the time. The `vintage_levels` sheet holds
+one such baseline for each of the last 12 quarters (`vintage_quarters` in the
 script). Each is built from FRED's real-time data (ALFRED) as known at the end
 of that quarter, so it includes data to the quarter before and that
 quarter's SEP. It uses the same definitions and assumptions as above and runs
 to the current `data_end`. The earliest vintage is the earliest Commitment
 start the tab offers.
+
+The loss function only needs each loss variable's gap from its target, so
+the `vintages` sheet (what the dashboard reads) holds those gaps, measured
+from the targets as they stood at the time. ezdyn reads one
+`<loss variable>_gap_loss` column per loss variable, named by its display
+name and in dashboard units, as `vintage` and `date` rows:
+
+| Column | Gap | Target |
+|---|---|---|
+| `Inflation_gap_loss` | GDP deflator inflation (quarterly) less the target | 2% a year (0.5% a quarter), the Fed's target |
+| `Nominal Interest Rate Changes_gap_loss` | Quarterly change in the annualised fed funds rate | No change |
+| `Unemployment Rate_gap_loss` | Unemployment rate less the target, in percentage points | The Fed's NAIRU estimate at the time: the SEP's longer-run unemployment median (`UNRATEMDLR`) in that quarter |
+| `Output Growth_gap_loss` | Quarterly real GDP growth (`dy`) less the target | The Fed's estimate of potential growth at the time: the SEP's longer-run GDP growth median (`GDPC1MDLR`) in that quarter, converted to a quarterly log change |
+| `Output_gap_loss` | Zero: SW's "Output" has no data and stays at steady state, as in the baseline | Steady state |
+
+It also has `Nominal Interest Rate` (annualised), the instrument's level, for
+the ELB. `vintage_levels` adds the unemployment rate (`unemployment`), that
+NAIRU estimate (`nairu`) and that potential growth estimate
+(`potential_growth`, per cent a year) to each vintage's `baseline` columns.
+
+Commitment needs a vintage column for every loss variable selected, so the
+tab offers only these five as loss variables. "Unemployment Rate" is offered only while Gali
+Unemployment (2010), the only model with it, is the only model selected. Its
+baseline is the US unemployment rate (the `baseline` sheet's `unemployment`,
+history then the path to the SEP), not the model's steady state.
+
+The tab measures the current quarter's gaps from its target inputs, which
+default to the `targets` sheet: the same targets the vintages use, as they
+stand today. So by default the current unemployment gap is from the Fed's
+latest NAIRU estimate, and each vintage's from the estimate of its time.
 
 Smets-Wouters' monetary policy shock is always a surprise. Future policy moves
 can't change today's expectations, so commitment, timeless commitment and
@@ -256,6 +288,7 @@ inflation fall after an RR shock. After a GK shock they rise slightly at first
 | `pinfobs_ye` | Inflation (year-ended) | Sum of the last four quarters of `pinfobs` |
 | `robs` | Nominal Interest Rate | Fed funds rate (stored as fed funds rate / 4, shown x 4) |
 | `robs_q` | Nominal Interest Rate (quarterly) | Fed funds rate / 4 |
+| `robs_change` | Nominal Interest Rate Changes | Quarterly change in the annualised fed funds rate (not in Alternative Paths) |
 
 Codes, names and units match Smets-Wouters', so the models use the
 dashboard's US baseline and Optimal Policy settings unchanged. Each shock is
@@ -286,7 +319,7 @@ scaled so the fed funds rate peaks 100bp (annualised) above baseline.
 
 ## Common variables
 
-Every DSGE model (Smets-Wouters and the 7 Pfeifer models) has these six
+Every DSGE model (Smets-Wouters and the 7 Pfeifer models) has these eight
 variables under the same name and units, so they can be compared across
 models in the Impulse Response Library and Alternative Paths:
 
@@ -296,8 +329,10 @@ models in the Impulse Response Library and Alternative Paths:
 | Inflation (year-ended) | Per cent (year-ended) |
 | Nominal Interest Rate | Per cent (annualized) |
 | Nominal Interest Rate (quarterly) | Per cent (quarterly) |
+| Nominal Interest Rate Changes | Percentage points (annualized) |
 | Hours Worked | Per cent deviation from steady state |
 | Output | Per cent deviation from steady state |
+| Output Growth | Per cent (quarterly) |
 
 Each comes from the model variable below. In every model:
 
@@ -307,6 +342,14 @@ Each comes from the model variable below. In every model:
   with a `scale_formula` of 4. In the US baseline it is the effective fed
   funds rate. "Nominal Interest Rate (quarterly)" is a derived row that scales
   it back by 1/4.
+- "Nominal Interest Rate Changes" is the quarterly change in the annualised
+  rate (the `diff` transform), e.g. for interest-rate smoothing in the
+  Optimal Policy loss function. It isn't offered in Alternative Paths.
+- "Output Growth" is the model's own output growth variable in SW (`dy`) and
+  Ireland (`ghat`). Every other model gets a derived row, the quarterly
+  change in "Output" (the `diff` transform): the deviation of output growth
+  from trend, as SW's `dy` is (`dy = y - y(-1)` plus a constant trend). In
+  the US baseline it is real GDP growth.
 - Every other interest rate is annualised the same way (x 4): the Gali
   models', Ascari-Sbordone's and Born-Pfeifer's real and natural rates, and
   SW's model-consistent nominal rate `r`.
@@ -315,8 +358,9 @@ Because the policy instrument is annualised, the Alternative Paths sliders,
 Custom IRF targets and Optimal Policy rate settings (loss targets, bounds and
 the 0.1% ELB) are all in annual per cent.
 
-The semi-structural models also have "Inflation (year-ended)" and "Nominal
-Interest Rate (quarterly)" (see their Variables table above).
+The semi-structural models also have "Inflation (year-ended)", "Nominal
+Interest Rate (quarterly)", "Nominal Interest Rate Changes" and "Output
+Growth" (see their Variables table above).
 
 | Model | Inflation | Nominal Interest Rate | Hours Worked | Output |
 |---|---|---|---|---|
@@ -352,6 +396,11 @@ Where a model's own label differs (e.g. "Price Inflation", "Employment"),
   margin: employment is the only labour input in production. So hours worked
   move one-for-one with employment. This is the model's own assumption, not
   an approximation added here.
+- **Gali (2010)'s unemployment rate is a level.** The model's `urhat` is the
+  unemployment rate's deviation from steady state, in percentage points. Its
+  units are "Per cent (of the labour force)", like an interest rate: the
+  model moves it in percentage points around a baseline in per cent, the US
+  unemployment rate.
 - **Ireland (2004) hours equal detrended output.** Technology is
   `Y_t = Z_t * h_t` (Ireland 2004, eq. 6), so hours equal output relative to
   technology, `Y_t / Z_t`. That is the model's `yhat`, for every shock.
@@ -406,7 +455,7 @@ The build scripts set each variable's plot axis symbols from its `units`:
 |---|---|---|
 | Per cent (quarterly, annualized or year-ended) | ppt | % |
 | Per cent deviation from steady state | % dev | % dev |
-| Percentage points deviation from steady state | ppt | ppt |
+| Percentage points (deviation from steady state, or a change) | ppt | ppt |
 
 Impulse responses use `unit_symbol_irf`, because they are changes from
 baseline: a rate moves in percentage points. Alternative Paths use

@@ -145,10 +145,26 @@ sw_build_baseline <- function(model, dates) {
 
   varmeta <- model$M_$varmeta
   us_data <- openxlsx2::read_xlsx(us_baseline_path, sheet = "baseline") |>
+    select(-any_of("unemployment")) |>
     sw_display_units(model) |>
     rename(any_of(stats::setNames(varmeta$dynare_name, varmeta$display_name)))
 
   dplyr::rows_update(baseline, us_data, by = "date")
+}
+
+# Overwrite the combined baseline's "Unemployment Rate" (Gali Unemployment
+# (2010)'s, otherwise at steady state) with the US unemployment rate from the
+# FRED/SEP baseline, in per cent. The Optimal Policy tab measures its gap from
+# the tab's unemployment target.
+us_add_unemployment <- function(baseline) {
+  us_data <- openxlsx2::read_xlsx(us_baseline_path, sheet = "baseline")
+  if (!("Unemployment Rate" %in% names(baseline)) || !("unemployment" %in% names(us_data))) {
+    stop("The baseline and inputs/us_baseline.xlsx must both have the unemployment rate; re-run build_us_baseline.R.", call. = FALSE)
+  }
+  rate <- us_data$unemployment[match(baseline$date, as.Date(us_data$date))]
+  if (anyNA(rate)) stop("inputs/us_baseline.xlsx doesn't cover every baseline quarter's unemployment rate.", call. = FALSE)
+  baseline[["Unemployment Rate"]] <- rate
+  baseline
 }
 
 # Read each of the 7 additional metadata variables' own steady-state level
@@ -214,11 +230,16 @@ usa_dashboard <- function() {
   # horizon so `extend_baseline` can stay at its default (identity).
   timeline <- lapply(openxlsx2::read_xlsx(us_baseline_path, sheet = "timeline"), as.Date)
   timeline$forecast_end <- seq(timeline$forecast_start, by = "quarter", length.out = alt_paths_quarters)[[alt_paths_quarters]]
-  # Real-time baselines from past quarters, for timeless commitment, in the
-  # same display units as the baseline. The earliest sets the earliest
-  # commitment start.
-  vintages <- openxlsx2::read_xlsx(us_baseline_path, sheet = "vintages") |>
-    sw_display_units(sw_model)
+  # Loss-function gaps in real-time baselines from past quarters, for timeless
+  # commitment: one `<loss variable>_gap_loss` column per loss variable,
+  # already in display units (see build_us_baseline.R). The earliest vintage
+  # sets the earliest commitment start.
+  vintages <- openxlsx2::read_xlsx(us_baseline_path, sheet = "vintages")
+  # The current loss-function targets (2% a year inflation, the Fed's latest
+  # NAIRU estimate, no rate change), measured the same way as the vintages'.
+  # The Optimal Policy tab measures the current gaps from these by default.
+  targets <- openxlsx2::read_xlsx(us_baseline_path, sheet = "targets")
+  targets <- stats::setNames(as.numeric(targets$target), targets$variable)
 
   # `import_baseline()`'s `translate_baseline()` step only recognizes columns
   # matching ITS OWN `source_model`'s metadata (columns from other models are
@@ -234,6 +255,7 @@ usa_dashboard <- function() {
     extra_baseline <- ezdyn::import_baseline(input = extra_baseline_df, source_model = extra_model, models = models)
     baseline <- dsgemoddash_merge_new_columns(baseline, extra_baseline)
   }
+  baseline <- us_add_unemployment(baseline)
 
   config <- ezdyn::configure_dashboard(
     name = "ezdyn Dashboard (USA)",
@@ -258,7 +280,7 @@ usa_dashboard <- function() {
     # steady-state baselines.
     alt_paths = list(defaults = list(models = "Smets Wouters (2007)")),
     # Every model is offered. The tab only offers loss variables that every
-    # selected model has, e.g. not "Output growth" while a Gali model is
+    # selected model has, e.g. not "Real Wage Growth" while a Gali model is
     # selected. SW is the baseline model, as the first model.
     optimal_policy = list(
       defaults = list(models = c("Smets Wouters (2007)", "Gali NK (Ch.3)")),
@@ -267,17 +289,15 @@ usa_dashboard <- function() {
       forecast_end = timeline$data_end,
       preloss_start = min(vintages$vintage),
       loss_variable_vintages = vintages,
+      # The loss variables with past gaps in `vintages`, which Commitment
+      # (timeless commitment) needs. "Unemployment Rate" is offered while Gali
+      # Unemployment (2010), the only model with it, is the only model
+      # selected.
       loss_variable_choices = c(
-        "Inflation" = "Inflation",
-        "Output growth" = "Output Growth",
-        "Output" = "Output",
-        "Nominal interest rate" = "Nominal Interest Rate",
-        "Real wage growth" = "Real Wage Growth"
+        "Inflation", "Output", "Output Growth", "Nominal Interest Rate Changes", "Unemployment Rate"
       ),
-      constraint_variable_choices = c(
-        "Nominal interest rate" = "Nominal Interest Rate",
-        "Inflation" = "Inflation"
-      ),
+      constraint_variable_choices = c("Nominal Interest Rate", "Inflation"),
+      loss_variable_defaults = targets,
       default_response_variables = c("Inflation", "Output", "Nominal Interest Rate"),
       default_loss_variables = c("Inflation", "Output")
     )

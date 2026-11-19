@@ -322,3 +322,36 @@ testthat::test_that("configure_dashboard validates optimal-policy help/descripti
     "Help hooks"
   )
 })
+
+testthat::test_that("configure_dashboard labels unnamed loss and constraint choices with their values", {
+  model <- dashboard_test_model()
+  arguments <- list(
+    models = list(DINGO = model),
+    timeline = dashboard_test_timeline(),
+    baselines = list(Staff = dashboard_test_baseline()),
+    default_baseline = "Staff"
+  )
+  policy_config <- list(
+    policy_model = "DINGO",
+    forecast_end = as.Date("2024-12-01"),
+    preloss_start = as.Date("2023-12-01"),
+    loss_variable_choices = c("Inflation", "Cash rate changes" = "dr"),
+    constraint_variable_choices = "Cash Rate"
+  )
+
+  config <- do.call(configure_dashboard, c(arguments, list(optimal_policy = policy_config)))
+  testthat::expect_identical(config$optimal_policy$loss_variable_choices, c("Inflation" = "Inflation", "Cash rate changes" = "dr"))
+  testthat::expect_identical(config$optimal_policy$constraint_variable_choices, c("Cash Rate" = "Cash Rate"))
+
+  for (invalid in list(character(0), list("Inflation"), c("Inflation", NA))) {
+    policy_config$loss_variable_choices <- invalid
+    testthat::expect_error(do.call(configure_dashboard, c(arguments, list(optimal_policy = policy_config))), "choice-list")
+  }
+
+  policy_config$loss_variable_choices <- "Inflation"
+  policy_config$loss_variable_vintages <- data.frame(date = as.Date("2023-12-01"), Inflation_gap_loss = 0)
+  testthat::expect_error(
+    do.call(configure_dashboard, c(arguments, list(optimal_policy = policy_config))),
+    "needs `vintage` and `date` columns"
+  )
+})
