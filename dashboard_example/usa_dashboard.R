@@ -54,7 +54,12 @@ library(tibble)
 
 sw_dynare_path <- "inputs/SW_2007_45.json"
 sw_metadata_path <- "inputs/variable_metadata.xlsx"
+# The three workbooks build_us_baseline.R writes: the data (not tracked in
+# git), the timeline and loss-function targets (tracked in git), and,
+# optionally, real-time vintages for Optimal Policy's timeless commitment.
 us_baseline_path <- "inputs/us_baseline.xlsx"
+us_settings_path <- "inputs/us_settings.xlsx"
+us_vintages_path <- "inputs/us_vintages.xlsx"
 
 # The 7 additional curated Pfeifer NK models (see build_new_models.m /
 # build_model_metadata.R). Each entry names the model in the dashboard,
@@ -146,6 +151,31 @@ sw_build_baseline <- function(model, dates) {
   dplyr::rows_update(baseline, us_data, by = "date")
 }
 
+# Read the real-time vintages (build_us_baseline.R's inputs/us_vintages.xlsx)
+# for Optimal Policy's timeless commitment, or return `NULL`, so the dashboard
+# runs with ordinary commitment, if there's no vintages workbook or it's out
+# of date (its latest vintage isn't the quarter before `forecast_start`, so
+# it was built for a different baseline).
+us_read_vintages <- function(path, forecast_start) {
+  if (!file.exists(path)) {
+    message("No ", path, ", so Optimal Policy's Commitment is ordinary, not timeless, commitment. Build it with build_us_baseline.R.")
+    return(NULL)
+  }
+  vintages <- openxlsx2::read_xlsx(path, sheet = "vintages")
+  vintages$vintage <- as.Date(vintages$vintage)
+  vintages$date <- as.Date(vintages$date)
+  expected_last <- seq(forecast_start, by = "-1 quarter", length.out = 2)[[2]]
+  if (max(vintages$vintage) != expected_last) {
+    warning(
+      path, " doesn't match ", us_settings_path, "'s timeline (its latest vintage is ", max(vintages$vintage),
+      ", not ", expected_last, "), so it's ignored and Commitment is ordinary commitment. Rebuild both with build_us_baseline.R.",
+      call. = FALSE
+    )
+    return(NULL)
+  }
+  vintages
+}
+
 # Overwrite the combined baseline's "Unemployment Rate" (Gali Unemployment
 # (2010)'s, otherwise at steady state) with the US unemployment rate from the
 # FRED/SEP baseline, in per cent. The Optimal Policy tab measures its gap from
@@ -222,17 +252,18 @@ usa_dashboard <- function() {
   # (the Alternative Paths window) cut to `alt_paths_quarters`. The baseline
   # runs on to `data_end`, which Optimal Policy uses as its longer commitment
   # horizon so `extend_baseline` can stay at its default (identity).
-  timeline <- lapply(openxlsx2::read_xlsx(us_baseline_path, sheet = "timeline"), as.Date)
+  timeline <- lapply(openxlsx2::read_xlsx(us_settings_path, sheet = "timeline"), as.Date)
   timeline$forecast_end <- seq(timeline$forecast_start, by = "quarter", length.out = alt_paths_quarters)[[alt_paths_quarters]]
   # Loss-function gaps in real-time baselines from past quarters, for timeless
   # commitment: one `<loss variable>_gap_loss` column per loss variable,
   # already in display units (see build_us_baseline.R). The earliest vintage
-  # sets the earliest commitment start.
-  vintages <- openxlsx2::read_xlsx(us_baseline_path, sheet = "vintages")
+  # sets the earliest commitment start. Optional: without them, Commitment is
+  # ordinary commitment from the forecast start.
+  vintages <- us_read_vintages(us_vintages_path, timeline$forecast_start)
   # The current loss-function targets (2% a year inflation, the Fed's latest
   # NAIRU estimate, no rate change), measured the same way as the vintages'.
   # The Optimal Policy tab measures the current gaps from these by default.
-  targets <- openxlsx2::read_xlsx(us_baseline_path, sheet = "targets")
+  targets <- openxlsx2::read_xlsx(us_settings_path, sheet = "targets")
   targets <- stats::setNames(as.numeric(targets$target), targets$variable)
 
   # `import_baseline()`'s `translate_baseline()` step only recognizes columns
@@ -293,10 +324,12 @@ usa_dashboard <- function() {
       use_cd = TRUE,
       lambda = 0.8,
       forecast_end = timeline$data_end,
-      preloss_start = min(vintages$vintage),
+      # Without vintages these are NULL: the commitment start defaults to the
+      # forecast start, and Commitment is ordinary commitment.
+      preloss_start = if (!is.null(vintages)) min(vintages$vintage),
       loss_variable_vintages = vintages,
-      # The loss variables with past gaps in `vintages`, which Commitment
-      # (timeless commitment) needs. "Unemployment Rate" is offered while Gali
+      # The loss variables with past gaps in `vintages`, which timeless
+      # commitment needs. "Unemployment Rate" is offered while Gali
       # Unemployment (2010), the only model with it, is the only model
       # selected.
       loss_variable_choices = c(

@@ -1,4 +1,5 @@
 dashboard_example/inputs/us_baseline.xlsx
+dashboard_example/inputs/us_vintages.xlsx
 TODO.md
 dashboard_example/rsconnect/*
 .Rproj.user

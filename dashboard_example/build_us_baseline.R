@@ -1,13 +1,20 @@
-# Build US data for the dashboard (inputs/us_baseline.xlsx) from the FRED data
-# saved by fetch_us_fred.R (inputs/us_fred_raw.rds): history for the seven
-# Smets-Wouters (2007) observables and the unemployment rate, extended with
-# the Fed's Summary of Economic Projections (SEP) medians. See README.md for
-# the data definitions and forecast assumptions. It doesn't call FRED, so it
-# can be re-run freely after changes to the processing.
+# Build the USA dashboard's inputs from the FRED data saved by fetch_us_fred.R
+# (inputs/us_fred_raw.rds): history for the seven Smets-Wouters (2007)
+# observables and the unemployment rate, extended with the Fed's Summary of
+# Economic Projections (SEP) medians. See README.md for the data definitions
+# and forecast assumptions. It doesn't call FRED, so it can be re-run freely
+# after changes to the processing. It writes three workbooks:
+#   inputs/us_baseline.xlsx - the data (not tracked in git)
+#   inputs/us_settings.xlsx - the timeline and loss-function targets, small
+#                             settings that are tracked in git
+#   inputs/us_vintages.xlsx - real-time vintages for Optimal Policy's timeless
+#                             commitment (optional, not tracked in git)
 #
 # Everything is built in the dashboard's display names and units (as in
 # inputs/variable_metadata.xlsx), except `model_data`, which converts to
-# Smets-Wouters' own Dynare names and definitions. Output sheets:
+# Smets-Wouters' own Dynare names and definitions.
+#
+# us_baseline.xlsx sheets:
 #   baseline   - the dashboard's baseline, as close to the published data as
 #                the model's units allow: headline (not per person) growth,
 #                hours per person relative to their level once unemployment
@@ -17,12 +24,17 @@
 #   model_data - Smets-Wouters' own data definitions (per person growth,
 #                hours demeaned over the history, the quarterly rate `robs`),
 #                for re-running the model over current data and forecasts
+#
+# us_settings.xlsx sheets:
 #   timeline   - data_start, data_end, forecast_start, forecast_end, as used by
 #                ezdyn::configure_dashboard() (data_end is the end of the
 #                data, including the longer-run extension)
 #   targets    - the current loss-function targets (2% a year inflation, the
 #                latest SEP longer-run unemployment rate and GDP growth, no
 #                rate change), the Optimal Policy tab's default targets
+#
+# us_vintages.xlsx sheets (optional: without it, the dashboard's Optimal
+# Policy tab uses ordinary rather than timeless commitment):
 #   vintage_levels - `baseline` as known at the end of each of the previous
 #                `vintage_quarters` quarters (data to the quarter before, plus
 #                that quarter's SEP), with that vintage's loss-function
@@ -44,6 +56,8 @@ library(lubridate)
 
 fred_path <- "dashboard_example/inputs/us_fred_raw.rds"
 output_path <- "dashboard_example/inputs/us_baseline.xlsx"
+settings_path <- "dashboard_example/inputs/us_settings.xlsx"
+vintages_path <- "dashboard_example/inputs/us_vintages.xlsx"
 forecast_quarters <- 48 # data horizon, long enough for the Optimal Policy tab
 inflation_target <- 2   # the Fed's inflation target, per cent a year
 
@@ -244,22 +258,6 @@ loss_gaps <- function(levels, vintage) {
     mutate(vintage, .before = 1)
 }
 
-# 5. Vintages -------------------------------------------------------------
-# Each vintage (fetched as known at the end of its quarter) runs from its own
-# quarter to the current `data_end`, covering every loss horizon Optimal
-# Policy allows. Each holds its `baseline` and the targets its losses are
-# measured from.
-vintage_data <- purrr::map(fred$vintages, \(v) {
-  list(vintage = v$vintage, levels = dashboard_levels(build_us_data(v, data_end)))
-})
-vintage_levels <- purrr::map(vintage_data, \(v) {
-  v$levels |> filter(date >= v$vintage) |> mutate(vintage = v$vintage, .before = 1)
-}) |>
-  bind_rows()
-vintages <- purrr::map(vintage_data, \(v) loss_gaps(v$levels, v$vintage)) |>
-  bind_rows()
-if (anyNA(vintages)) stop("The loss-function vintages are incomplete.", call. = FALSE)
-
 # The current data and loss-function targets. The targets are the Optimal
 # Policy tab's default targets, so the current quarter's gaps match the
 # vintages'.
@@ -272,13 +270,31 @@ targets <- tibble(
   )
 )
 
-# 6. Write ----------------------------------------------------------------
-writexl::write_xlsx(
-  list(
-    baseline = select(current_levels, -ends_with(" target")),
-    model_data = model_data, timeline = timeline, targets = targets,
-    vintages = vintages, vintage_levels = vintage_levels
-  ),
-  output_path
-)
-message("Wrote ", output_path, ": ", paste(names(timeline), vapply(timeline, format, ""), sep = " = ", collapse = ", "))
+writexl::write_xlsx(list(baseline = select(current_levels, -ends_with(" target")), model_data = model_data), output_path)
+message("Wrote ", output_path)
+writexl::write_xlsx(list(timeline = timeline, targets = targets), settings_path)
+message("Wrote ", settings_path, ": ", paste(names(timeline), vapply(timeline, format, ""), sep = " = ", collapse = ", "))
+
+# 6. Vintages -------------------------------------------------------------
+# A separate workbook, only needed for Optimal Policy's timeless commitment:
+# without it the dashboard still runs, with ordinary commitment from the
+# forecast start. Each vintage (fetched as known at the end of its quarter)
+# runs from its own quarter to the current `data_end`, covering every loss
+# horizon Optimal Policy allows. Each holds its `baseline` and the targets
+# its losses are measured from.
+if (length(fred$vintages) == 0) {
+  message("No vintages in ", fred_path, ", so ", vintages_path, " wasn't written (delete any older copy).")
+} else {
+  vintage_data <- purrr::map(fred$vintages, \(v) {
+    list(vintage = v$vintage, levels = dashboard_levels(build_us_data(v, data_end)))
+  })
+  vintage_levels <- purrr::map(vintage_data, \(v) {
+    v$levels |> filter(date >= v$vintage) |> mutate(vintage = v$vintage, .before = 1)
+  }) |>
+    bind_rows()
+  vintages <- purrr::map(vintage_data, \(v) loss_gaps(v$levels, v$vintage)) |>
+    bind_rows()
+  if (anyNA(vintages)) stop("The loss-function vintages are incomplete.", call. = FALSE)
+  writexl::write_xlsx(list(vintages = vintages, vintage_levels = vintage_levels), vintages_path)
+  message("Wrote ", vintages_path, ": ", length(vintage_data), " vintages, ", min(vintages$vintage), " to ", max(vintages$vintage))
+}

@@ -73,6 +73,8 @@ testthat::test_that("Optimal Policy tab is included only when configured", {
       policy_model = "Fixture",
       forecast_end = as.Date("2024-06-01"),
       preloss_start = as.Date("2023-12-01"),
+      # Vintages enable timeless commitment, and so the commitment-start slider.
+      loss_variable_vintages = data.frame(vintage = as.Date("2023-12-01"), date = as.Date("2023-12-01"), infl_obs_ye_gap_loss = 0),
       loss_variable_choices = c("Inflation (year-ended)" = "infl_obs_ye", "Cash rate changes" = "dr"),
       constraint_variable_choices = c("Inflation (year-ended)" = "infl_obs_ye", "Cash rate" = "r_obs"),
       default_response_variables = "r_obs",

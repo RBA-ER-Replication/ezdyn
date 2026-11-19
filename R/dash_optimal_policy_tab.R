@@ -118,6 +118,12 @@ optimal_policy_constraint_table <- function(ns, policy_dates, config) {
   )
 }
 
+# Whether the configuration supplies loss-variable vintages, which timeless
+# commitment needs. Without them, the tab offers ordinary commitment.
+optimal_policy_has_vintages <- function(config) {
+  !is.null(config$optimal_policy$loss_variable_vintages)
+}
+
 #' Construct selected policy strategies from module inputs.
 #'
 #' @param input Shiny input values.
@@ -126,10 +132,15 @@ optimal_policy_constraint_table <- function(ns, policy_dates, config) {
 #' @return List of strategy specifications for [get_policy_scenarios()]. Each
 #'   strategy's `output_name` is left unset here - `get_policy_scenarios()`
 #'   builds it per model/strategy so the same strategy list works for any
-#'   number of configured models.
+#'   number of configured models. The Commitment control is timeless
+#'   commitment when the configuration supplies loss-variable vintages, and
+#'   otherwise ordinary commitment from the forecast start.
 optimal_policy_strategies <- function(input, constraints, config) {
   modes <- c("commit", "timeless", "disc")
   modes <- modes[modes %in% input$strategy_modes]
+  if (!optimal_policy_has_vintages(config)) {
+    modes <- unique(replace(modes, modes == "timeless", "commit"))
+  }
   # Discretion allows a longer loss horizon, but not a shorter one: a
   # policymaker after the loss horizon would have nothing to minimise.
   if ("disc" %in% modes && input$loss_horizon < input$instrument_horizon) {
@@ -283,7 +294,9 @@ UITab_OptimalPolicy <- function(id, config) {
         shiny::checkboxInput(ns("elb"), "ELB", FALSE),
         shiny::tags$label(shiny::tagList("Constraints", help_button(ns("help_constraints"))), class = "control-label"),
         optimal_policy_constraint_table(ns, policy_dates, config),
-        shiny::conditionalPanel(
+        # The commitment start is only meaningful for timeless commitment,
+        # which needs vintages.
+        if (optimal_policy_has_vintages(config)) shiny::conditionalPanel(
           condition = sprintf("input['%s'] && input['%s'].indexOf('timeless') !== -1", ns("strategy_modes"), ns("strategy_modes")),
           shiny::sliderInput(ns("preloss_start"), shiny::tagList("Commitment start", help_button(ns("help_commitment_start"))), min = policy$preloss_start, max = policy$forecast_start, value = policy$preloss_start, timeFormat = "%Y-%m-%d")
         ),

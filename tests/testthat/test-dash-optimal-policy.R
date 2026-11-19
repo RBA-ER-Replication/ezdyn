@@ -114,7 +114,8 @@ testthat::test_that("Optimal Policy maps the Commitment control to timeless comm
     weight_infl_obs = 1,
     discount_factor = 0.99
   )
-  config <- list(optimal_policy = list(instrument_variable = "r_obs", instrument_shock = "eps_r"))
+  vintages <- data.frame(vintage = as.Date("2024-03-01"), date = as.Date("2024-03-01"), infl_obs_gap_loss = 0)
+  config <- list(optimal_policy = list(instrument_variable = "r_obs", instrument_shock = "eps_r", loss_variable_vintages = vintages))
 
   actual <- optimal_policy_strategies(input, list(), config)
 
@@ -123,6 +124,23 @@ testthat::test_that("Optimal Policy maps the Commitment control to timeless comm
   # per model (e.g. "Optimal (DINGO, commitment)").
   testthat::expect_true(all(vapply(actual, function(strategy) is.null(strategy$output_name), logical(1))))
   testthat::expect_identical(vapply(actual, `[[`, character(1), "instrument_shock"), c("eps_r", "eps_r"))
+})
+
+testthat::test_that("Optimal Policy falls back to ordinary commitment without vintages", {
+  input <- list(
+    strategy_modes = c("timeless", "disc"),
+    loss_horizon = 4L,
+    instrument_horizon = 4L,
+    response_variables = "r_obs",
+    loss_variables = "infl_obs",
+    weight_infl_obs = 1,
+    discount_factor = 0.99
+  )
+  config <- list(optimal_policy = list(instrument_variable = "r_obs", instrument_shock = "eps_r"))
+
+  actual <- optimal_policy_strategies(input, list(), config)
+
+  testthat::expect_identical(vapply(actual, `[[`, character(1), "commit"), c("commit", "disc"))
 })
 
 testthat::test_that("Optimal Policy allows discretion with a longer loss horizon but not a shorter one", {
@@ -237,6 +255,7 @@ testthat::test_that("Optimal Policy UI uses configured description and a button-
     optimal_policy = list(
       policy_model = "DINGO", forecast_start = as.Date("2026-09-01"),
       forecast_end = as.Date("2028-12-01"), preloss_start = as.Date("2024-03-01"), lambda = 0.8,
+      loss_variable_vintages = data.frame(vintage = as.Date("2024-03-01"), date = as.Date("2024-03-01"), infl_obs_ye_gap_loss = 0),
       loss_variable_choices = c("Inflation (year-ended)" = "infl_obs_ye", "Cash rate changes" = "dr"),
       constraint_variable_choices = c("Inflation (year-ended)" = "infl_obs_ye", "Cash rate" = "r_obs"),
       default_response_variables = "r_obs",
@@ -249,6 +268,13 @@ testthat::test_that("Optimal Policy UI uses configured description and a button-
   )
 
   html <- as.character(UITab_OptimalPolicy("policy", config))
+  # Without vintages there is no timeless commitment, so no commitment start.
+  no_vintages <- config
+  no_vintages$optimal_policy$loss_variable_vintages <- NULL
+  no_vintages_html <- as.character(UITab_OptimalPolicy("policy", no_vintages))
+  testthat::expect_match(html, "policy-preloss_start", fixed = TRUE)
+  testthat::expect_false(grepl("policy-preloss_start", no_vintages_html, fixed = TRUE))
+  testthat::expect_match(no_vintages_html, "Generate graph", fixed = TRUE)
 
   testthat::expect_match(html, "Generate graph")
   testthat::expect_match(html, "Generating optimal policy graph")

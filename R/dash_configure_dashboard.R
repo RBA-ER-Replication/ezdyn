@@ -670,8 +670,10 @@ dashboard_validate_plotters <- function(plotters) {
 #'   display names so one list works across models; dynare codes also work.
 #'   The tab labels each choice with its value. Optionally, name an element to
 #'   give it a different label, e.g. `c("Output gap" = "Output", "Inflation")`.
-#'   `loss_variable_vintages` (needed for the tab's Commitment strategy, which
-#'   is timeless commitment) is a data frame of past baselines: `vintage` and
+#'   `loss_variable_vintages` (optional) makes the tab's Commitment strategy
+#'   timeless commitment, re-solved from a past commitment start; without it,
+#'   Commitment is ordinary commitment from the forecast start and the tab has
+#'   no commitment-start control. It is a data frame of past baselines: `vintage` and
 #'   `date` columns plus one `<loss variable>_gap_loss` column per loss
 #'   variable, named by the variable's value in `loss_variable_choices`
 #'   (e.g. `Inflation_gap_loss`), holding its gap from the target as it stood

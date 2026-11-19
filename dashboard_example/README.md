@@ -14,7 +14,10 @@ exercises.
 
 The model objects are already built and stored in `inputs/`, so you don't
 need MATLAB, Dynare or DSGE_mod. You only need to build the US baseline
-(`inputs/us_baseline.xlsx`), which isn't stored in this repository.
+(`inputs/us_baseline.xlsx`), which isn't stored in this repository. Its
+timeline and loss-function targets (`inputs/us_settings.xlsx`) are stored
+here, and must match the baseline, so rebuilding the baseline rewrites them
+too.
 
 You need R with ezdyn installed (see [Installation](../README.md#installation))
 and a free [FRED API key](https://fred.stlouisfed.org/docs/api/api_key.html).
@@ -35,11 +38,22 @@ and a free [FRED API key](https://fred.stlouisfed.org/docs/api/api_key.html).
 
    `fetch_us_fred.R` downloads everything from FRED (taking a couple of
    minutes, mostly for the real-time vintages) and saves it, unprocessed, to
-   `inputs/us_fred_raw.rds`. `build_us_baseline.R` turns that into
-   `inputs/us_baseline.xlsx` without calling FRED, so it can be re-run freely
-   after changing the processing. Re-run both after each data release or SEP
-   to refresh the baseline. Both files are gitignored. See
-   [US baseline data](#us-baseline-data) for what it builds.
+   `inputs/us_fred_raw.rds`. `build_us_baseline.R` turns that into three
+   workbooks, without calling FRED, so it can be re-run freely after changing
+   the processing:
+
+   | Workbook | Contents | In git |
+   |---|---|---|
+   | `inputs/us_baseline.xlsx` | The baseline data | No |
+   | `inputs/us_settings.xlsx` | The timeline and loss-function targets | Yes |
+   | `inputs/us_vintages.xlsx` | Real-time vintages for Optimal Policy's timeless commitment (optional) | No |
+
+   The dashboard needs the first two. Without the vintages, or if they don't
+   match the timeline, it still launches, with a message: Optimal Policy's
+   Commitment is then ordinary commitment from the forecast start, with no
+   "Commitment start" control. Re-run both scripts after each data release or
+   SEP to refresh the data, and commit the updated `us_settings.xlsx`. See
+   [US baseline data](#us-baseline-data) for what they build.
 
 3. Launch the dashboard. From the repo root, in R:
 
@@ -83,16 +97,16 @@ variable/shock/parameter metadata workbook.
 [FRED](https://fred.stlouisfed.org/) data saved by `fetch_us_fred.R`:
 history for Smets-Wouters' seven observables and the unemployment rate,
 extended with the medians from the Fed's latest Summary of Economic
-Projections (SEP). `inputs/us_baseline.xlsx` has six sheets:
+Projections (SEP). It writes three workbooks:
 
-| Sheet | Contents | Used by |
-|---|---|---|
-| `baseline` | History and forecast in display names and units: headline growth rates, hours relative to their long-run level, the annualised nominal rate, and "Unemployment Rate" | The dashboard baseline ("Unemployment Rate" is Gali Unemployment (2010)'s) |
-| `model_data` | The same data in Smets-Wouters' own definitions and Dynare names: per-person growth rates, demeaned hours, the quarterly rate `robs` | Re-running SW over current data and forecasts (e.g. for shock decompositions) |
-| `timeline` | `data_start`, `data_end`, `forecast_start`, `forecast_end` | The dashboard timeline |
-| `targets` | The current loss-function targets in display units: inflation 0.5% a quarter (2% a year), unemployment and output growth (quarterly and year-ended) at the latest SEP longer-run rates, no rate change | The Optimal Policy tab's default targets |
-| `vintages` | Loss-function gaps (each variable less its target at the time) in each of the last 12 quarters' baselines, in display units | Optimal Policy's timeless commitment |
-| `vintage_levels` | `baseline` as known in each of the last 12 quarters, plus that quarter's targets (`<display name> target`) | The source of `vintages` |
+| Workbook | Sheet | Contents | Used by |
+|---|---|---|---|
+| `us_baseline.xlsx` | `baseline` | History and forecast in display names and units: headline growth rates, hours relative to their long-run level, the annualised nominal rate, and "Unemployment Rate" | The dashboard baseline ("Unemployment Rate" is Gali Unemployment (2010)'s) |
+| | `model_data` | The same data in Smets-Wouters' own definitions and Dynare names: per-person growth rates, demeaned hours, the quarterly rate `robs` | Re-running SW over current data and forecasts (e.g. for shock decompositions) |
+| `us_settings.xlsx` (tracked in git) | `timeline` | `data_start`, `data_end`, `forecast_start`, `forecast_end` | The dashboard timeline |
+| | `targets` | The current loss-function targets in display units: inflation 0.5% a quarter (2% a year), unemployment and output growth (quarterly and year-ended) at the latest SEP longer-run rates, no rate change | The Optimal Policy tab's default targets |
+| `us_vintages.xlsx` (optional) | `vintages` | Loss-function gaps (each variable less its target at the time) in each of the last 12 quarters' baselines, in display units | Optimal Policy's timeless commitment |
+| | `vintage_levels` | `baseline` as known in each of the last 12 quarters, plus that quarter's targets (`<display name> target`) | The source of `vintages` |
 
 Quarters are dated the first day of their last month (Q3 = `YYYY-09-01`).
 Growth rates are quarterly log changes x 100, not annualised. The script
@@ -185,7 +199,9 @@ For series the SEP doesn't cover:
 
 Timeless commitment assumes the Fed committed to its policy in some past
 quarter (the tab's "Commitment start"). It re-solves each quarter since then
-using the baseline as it looked at the time. The `vintage_levels` sheet holds
+using the baseline as it looked at the time. The vintages are a separate,
+optional dependency in `us_vintages.xlsx`: without them, the tab's Commitment
+is ordinary commitment from the forecast start. Its `vintage_levels` sheet holds
 one such baseline for each of the last 12 quarters (`vintage_quarters` in
 `fetch_us_fred.R`). Each is built from FRED's real-time data (ALFRED) as known
 at the end of that quarter, so it includes data to the quarter before and that
@@ -215,8 +231,8 @@ targets, in display units: `Inflation target`, `Unemployment Rate target`
 (year-ended) target` (that potential growth estimate, as quarterly and
 year-ended log changes). Each gap in `vintages` is the level less its target.
 
-Commitment needs a vintage column for every loss variable selected, so the
-tab offers only these six as loss variables (Inflation, Output Growth and
+Timeless commitment needs a vintage column for every loss variable selected,
+so the tab offers only these six as loss variables (Inflation, Output Growth and
 Nominal Interest Rate Changes by default). "Unemployment Rate" is offered
 only while Gali Unemployment (2010), the only model with it, is the only
 model selected. Its baseline is the US unemployment rate (the `baseline`
@@ -634,8 +650,9 @@ The US baseline is built as in the [Quick start](#quick-start).
   Gertler-Karadi semi-structural models from McKay and Wolf's (2023) estimates
   (R).
 - `inputs/` - the built model objects, metadata workbooks and semi-structural
-  responses, stored in this repo. `us_fred_raw.rds` and `us_baseline.xlsx` are
-  the exceptions: you build them yourself ([Quick start](#quick-start)) and
-  they aren't tracked.
+  responses, stored in this repo, along with `us_settings.xlsx` (the US
+  timeline and loss-function targets). `us_fred_raw.rds`, `us_baseline.xlsx`
+  and `us_vintages.xlsx` are the exceptions: you build them yourself
+  ([Quick start](#quick-start)) and they aren't tracked.
 - `DSGE_mod/` - cloned separately ([Rebuilding the model
   objects](#2-the-dsge_mod-models-matlab)), not tracked.
