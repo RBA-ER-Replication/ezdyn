@@ -61,7 +61,7 @@ us_baseline_path <- "inputs/us_baseline.xlsx"
 # gives it a distinct plot colour, and points at its JSON/metadata inputs.
 dsgemoddash_extra_models <- tribble(
   ~model_name,                  ~colour,          ~dynare_path,                            ~metadata_path,
-  "Gali NK (Ch.3)",             "steelblue",      "inputs/Gali2015Ch3.json",               "inputs/Gali2015Ch3_metadata.xlsx",
+  "Gali NK (Ch.3)",             "red",      "inputs/Gali2015Ch3.json",               "inputs/Gali2015Ch3_metadata.xlsx",
   "Gali NK+Wage (Ch.6)",        "darkorange",     "inputs/Gali2015Ch6.json",               "inputs/Gali2015Ch6_metadata.xlsx",
   "Gali SOE (Ch.8)",            "purple",         "inputs/Gali2015Ch8.json",               "inputs/Gali2015Ch8_metadata.xlsx",
   "Gali Unemployment (2010)",   "firebrick",      "inputs/Gali2010.json",                  "inputs/Gali2010_metadata.xlsx",
@@ -271,19 +271,27 @@ usa_dashboard <- function() {
     # (they share "Nominal Interest Rate"/"Monetary policy shock" with SW),
     # but only Smets Wouters (2007) is selected by default - it is the only
     # model with a real historical baseline; the others use synthetic
-    # steady-state baselines.
-    alt_paths = list(defaults = list(models = "Smets Wouters (2007)")),
-    # Every model is offered. The tab only offers loss variables that every
-    # selected model has, e.g. not "Real Wage Growth" while a Gali model is
-    # selected. SW is the baseline model, as the first model.
+    # steady-state baselines. Year-ended inflation and output growth and the
+    # nominal rate are plotted by default, with anticipated shocks at an
+    # anticipation (cognitive discounting) parameter of 0.8.
+    alt_paths = list(defaults = list(
+      models = "Smets Wouters (2007)",
+      display_names = c("Inflation (year-ended)", "Output Growth (year-ended)", "Nominal Interest Rate"),
+      lambda = 0.8
+    )),
+    # Every model is offered; Smets Wouters (2007), the baseline model (as the
+    # first model), a Pfeifer NK model and an empirical model are selected by
+    # default. The tab only offers loss variables that every selected model
+    # has, e.g. not "Unemployment Rate" while SW is selected.
     optimal_policy = list(
-      defaults = list(models = c("Smets Wouters (2007)", "Gali NK (Ch.3)")),
+      defaults = list(models = c("Smets Wouters (2007)", "Gali NK+Wage (Ch.6)", "Romer-Romer (2004)")),
       instrument_variable = "Nominal Interest Rate",
       instrument_shock = "Monetary policy shock",
       # Let the "Anticipation Parameter" input use anticipated policy shocks
       # (`em_1`, `em_2`, ...) in models that have them: Smets Wouters (2007).
-      # It defaults to 0 (surprise shocks); other models always use surprises.
+      # It defaults to 0.8; other models always use surprise shocks.
       use_cd = TRUE,
+      lambda = 0.8,
       forecast_end = timeline$data_end,
       preloss_start = min(vintages$vintage),
       loss_variable_vintages = vintages,
@@ -292,12 +300,13 @@ usa_dashboard <- function() {
       # Unemployment (2010), the only model with it, is the only model
       # selected.
       loss_variable_choices = c(
-        "Inflation", "Output", "Output Growth", "Nominal Interest Rate Changes", "Unemployment Rate"
+        "Inflation", "Output", "Output Growth", "Output Growth (year-ended)",
+        "Nominal Interest Rate Changes", "Unemployment Rate"
       ),
       constraint_variable_choices = c("Nominal Interest Rate", "Inflation"),
       loss_variable_defaults = targets,
-      default_response_variables = c("Inflation", "Output", "Nominal Interest Rate"),
-      default_loss_variables = c("Inflation", "Output")
+      default_response_variables = c("Inflation (year-ended)", "Output Growth (year-ended)", "Nominal Interest Rate"),
+      default_loss_variables = c("Inflation", "Output Growth", "Nominal Interest Rate Changes")
     )
   )
 

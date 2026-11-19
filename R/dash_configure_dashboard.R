@@ -339,6 +339,14 @@ dashboard_validate_alt_paths_config <- function(alt_paths, models) {
       !all(defaults$models %in% alt_paths$models)) {
     stop("`alt_paths$defaults$models` must contain eligible Alt Paths model labels.", call. = FALSE)
   }
+  # Initially plotted response variables (`NULL` uses `irf$defaults$display_names`)
+  # and the initial cognitive-discounting (anticipation) parameter.
+  defaults$lambda <- dashboard_or_default(defaults$lambda, 0.8)
+  if ((!is.null(defaults$display_names) && (!is.character(defaults$display_names) || anyNA(defaults$display_names))) ||
+      !is.numeric(defaults$lambda) || length(defaults$lambda) != 1 || is.na(defaults$lambda) ||
+      defaults$lambda < 0 || defaults$lambda > 1) {
+    stop("`alt_paths$defaults` contains invalid display-name or lambda settings.", call. = FALSE)
+  }
 
   list(models = alt_paths$models, defaults = defaults)
 }
@@ -638,6 +646,10 @@ dashboard_validate_plotters <- function(plotters) {
 #'   `alt_paths$models` is the eligible model allow-list offered by the tab's
 #'   model selector (defaults to every configured model); `alt_paths$defaults$models`
 #'   is the selector's initial selection (defaults to every eligible model).
+#'   `alt_paths$defaults$display_names` sets the initially plotted response
+#'   variables (defaults to `irf$defaults$display_names`), and
+#'   `alt_paths$defaults$lambda` the initial cognitive-discounting
+#'   (anticipation) parameter (defaults to 0.8).
 #' @param dictionary Variable Dictionary model-selection configuration.
 #'   `dictionary$models` is the eligible model allow-list offered by the tab's
 #'   model selector (defaults to every configured model); `dictionary$defaults$models`

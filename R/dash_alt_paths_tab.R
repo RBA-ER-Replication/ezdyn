@@ -149,7 +149,10 @@ UITab_AltPaths <- function(id, config) {
         ns("display_names"),
         "Response variable:",
         choices = responses,
-        selected = irf_preserve_selection(config$irf$defaults$display_names, responses),
+        selected = irf_preserve_selection(
+          dashboard_or_default(config$alt_paths$defaults$display_names, config$irf$defaults$display_names),
+          responses
+        ),
         multiple = TRUE
       ),
       shiny::checkboxInput(
@@ -168,7 +171,7 @@ UITab_AltPaths <- function(id, config) {
             "Cognitive discounting parameter: ",
             help_button(ns("help_cognitive_discounting"))
           ),
-          value = 0.8,
+          value = dashboard_or_default(config$alt_paths$defaults$lambda, 0.8),
           min = 0,
           max = 1,
           step = 0.05
@@ -502,7 +505,7 @@ ServerTab_AltPaths <- function(id, config) {
           )
         ),
         shiny::tagList(
-          "Model input ",
+          "Model input (advanced users only) ",
           shiny::tags$span(
             class = "fa fa-info-circle",
             title = paste(
@@ -522,6 +525,10 @@ ServerTab_AltPaths <- function(id, config) {
       }
       shiny::showModal(shiny::modalDialog(
         title = "Upload Custom Baseline Paths",
+        shiny::tags$div(
+          style = "margin-bottom: 15px;",
+          shiny::downloadButton(ns("download_template"), "Download active baseline template")
+        ),
         shiny::fileInput(
           ns("uploaded_baseline"),
           "Upload a .xls or .xlsx file",
@@ -548,7 +555,6 @@ ServerTab_AltPaths <- function(id, config) {
           condition = sprintf("input['%s'] === 'display'", ns("upload_interpretation")),
           shiny::p("Values are retained in the default template units without rescaling.")
         ),
-        shiny::downloadButton(ns("download_template"), "Download active baseline template"),
         footer = shiny::tagList(
           shiny::modalButton("Cancel"),
           shiny::actionButton(ns("import_baseline"), "Import baseline", class = "btn-primary")

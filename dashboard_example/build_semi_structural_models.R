@@ -56,8 +56,9 @@ irfs <- purrr::imap(shocks, \(field, model) {
 # Variable codes, names and units match Smets-Wouters' (and the Gali models'
 # "Output Gap"), so the models share the dashboard baseline and Optimal
 # Policy settings. As in build_model_metadata.R, derived rows add the common
-# "Output" (the output gap, as potential is unaffected), "Inflation
-# (year-ended)" (four-quarter sum of quarterly inflation), "Nominal Interest
+# "Output" (the output gap, as potential is unaffected), "Output Growth
+# (year-ended)" and "Inflation (year-ended)" (four-quarter sums of the
+# quarterly growth rates), "Nominal Interest
 # Rate (quarterly)" and "Nominal Interest Rate Changes" (the quarterly change in
 # the annualised rate, for Optimal Policy's loss function) variables. "Nominal
 # Interest Rate" is shown annualised (x 4 on the quarterly `robs`). The output
@@ -68,6 +69,7 @@ variables <- tribble(
   "ygap",       "Output Gap",                        "Per cent deviation from steady state", FALSE,      NA,             NA,            NA,
   "output",     "Output",                            "Per cent deviation from steady state", TRUE,       NA,             "ygap",        NA,
   "dy",         "Output Growth",                     "Per cent (quarterly)",                 TRUE,       NA,             NA,            NA,
+  "dy_ye",      "Output Growth (year-ended)",        "Per cent (year-ended)",                TRUE,       NA,             "dy",          "year_ended_sum",
   "pinfobs",    "Inflation",                         "Per cent (quarterly)",                 TRUE,       NA,             NA,            NA,
   "pinfobs_ye", "Inflation (year-ended)",            "Per cent (year-ended)",                TRUE,       NA,             "pinfobs",     "year_ended_sum",
   "robs",       "Nominal Interest Rate",             "Per cent (annualized)",                TRUE,       "4",            NA,            NA,

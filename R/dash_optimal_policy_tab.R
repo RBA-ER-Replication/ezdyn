@@ -424,7 +424,7 @@ ServerTab_OptimalPolicy <- function(id, config) {
           )
         ),
         shiny::tagList(
-          "Model input ",
+          "Model input (advanced users only) ",
           shiny::tags$span(
             class = "fa fa-info-circle",
             title = paste(
@@ -444,6 +444,10 @@ ServerTab_OptimalPolicy <- function(id, config) {
       }
       shiny::showModal(shiny::modalDialog(
         title = "Upload Custom Baseline Paths",
+        shiny::tags$div(
+          style = "margin-bottom: 15px;",
+          shiny::downloadButton(ns("download_template"), "Download active baseline template")
+        ),
         shiny::fileInput(
           ns("uploaded_baseline"),
           "Upload a .xls or .xlsx file",
@@ -470,7 +474,6 @@ ServerTab_OptimalPolicy <- function(id, config) {
           condition = sprintf("input['%s'] === 'display'", ns("upload_interpretation")),
           shiny::p("Values are retained in the default template units without rescaling.")
         ),
-        shiny::downloadButton(ns("download_template"), "Download active baseline template"),
         footer = shiny::tagList(
           shiny::modalButton("Cancel"),
           shiny::actionButton(ns("import_baseline"), "Import baseline", class = "btn-primary")

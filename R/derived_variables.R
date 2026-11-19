@@ -27,10 +27,14 @@ ezdyn_linear_filter <- function(x, weights) {
 # Registered derived-variable transforms. Each is linear, so the same function
 # applies to a baseline level column and to an IRF deviation series (a linear
 # transform of a deviation stays consistent with adding it onto a baseline).
+# `year_ended_change` is the change over four quarters: the year-ended sum of
+# `diff`, for a variable whose quarterly change is itself derived (derived
+# rows can't chain).
 ezdyn_derived_transform_registry <- list(
   diff = function(x) ezdyn_linear_filter(x, c(1, -1)),
   diff2 = function(x) ezdyn_linear_filter(x, c(1, -2, 1)),
-  year_ended_sum = function(x) ezdyn_linear_filter(x, rep(1, 4))
+  year_ended_sum = function(x) ezdyn_linear_filter(x, rep(1, 4)),
+  year_ended_change = function(x) ezdyn_linear_filter(x, c(1, 0, 0, 0, -1))
 )
 
 # Validate derived-variable metadata: unknown transforms, self-reference, and

@@ -22,10 +22,10 @@
 # (ezdyn's `validate_display_names()` only errors when the SAME display name
 # is used with DIFFERENT units across models).
 #
-# Every model provides the same eight common variables: "Inflation",
+# Every model provides the same nine common variables: "Inflation",
 # "Inflation (year-ended)", "Nominal Interest Rate", "Nominal Interest Rate
-# (quarterly)", "Nominal Interest Rate Changes", "Hours Worked", "Output" and
-# "Output Growth". Where a model's own variable has a different name (e.g.
+# (quarterly)", "Nominal Interest Rate Changes", "Hours Worked", "Output",
+# "Output Growth" and "Output Growth (year-ended)". Where a model's own variable has a different name (e.g.
 # "Price Inflation"), a derived alias row (`derived_from`, no transform) adds
 # the common name alongside it. "Inflation (year-ended)" is the four-quarter
 # sum of each model's quarterly inflation. "Nominal Interest Rate" is each
@@ -33,8 +33,9 @@
 # (quarterly)" is the quarterly rate itself, and "Nominal Interest Rate
 # Changes" is the quarterly change in the annualised rate. "Output Growth" is
 # the quarterly change in "Output", for models without their own (SW and
-# Ireland have one). See README.md ("Common variables") for how each model
-# gets each variable.
+# Ireland have one), and "Output Growth (year-ended)" is the sum of its last
+# four quarters. See README.md ("Common variables") for how each model gets
+# each variable.
 #
 # The `alt_paths`, `irf` and `hsd` columns choose which dashboard tabs offer
 # a variable (Alternative Paths, the Impulse Response Library, Historical
@@ -125,18 +126,34 @@ annualise_rate <- function(df, rate, own_scale = NULL) {
     ))
 }
 
-# "Output Growth": the quarterly change in the model's output `output` (the
-# `diff` transform), for models without an output growth variable of their
-# own. It is the deviation of output growth from trend, as SW's `dy` is
-# (`dy = y - y(-1)` plus a constant trend), so the two share a display name.
-# `output` must be a model variable, not an alias row.
+# "Output Growth" and "Output Growth (year-ended)": the quarterly and
+# four-quarter changes in the model's output `output` (the `diff` and
+# `year_ended_change` transforms), for models without an output growth
+# variable of their own. Output growth is the deviation of output growth from
+# trend, as SW's `dy` is (`dy = y - y(-1)` plus a constant trend), so the two
+# share a display name, and the four-quarter change is the sum of its last
+# four quarters. `output` must be a model variable, not an alias row.
 output_growth_row <- function(output) {
   tibble(
-    dynare_name = paste0(output, "_growth"),
-    display_name = "Output Growth",
-    units = "Per cent (quarterly)",
+    dynare_name = paste0(output, c("_growth", "_growth_ye")),
+    display_name = c("Output Growth", "Output Growth (year-ended)"),
+    units = c("Per cent (quarterly)", "Per cent (year-ended)"),
     derived_from = output,
-    derived_transform = "diff"
+    derived_transform = c("diff", "year_ended_change")
+  )
+}
+
+# "Output Growth (year-ended)": the sum of the last four quarters of the
+# model's own quarterly output growth variable `growth` (SW and Ireland), like
+# "Inflation (year-ended)". `growth` must be a model variable, not an alias
+# row.
+year_ended_output_growth_row <- function(growth) {
+  tibble(
+    dynare_name = paste0(growth, "_ye"),
+    display_name = "Output Growth (year-ended)",
+    units = "Per cent (year-ended)",
+    derived_from = growth,
+    derived_transform = "year_ended_sum"
   )
 }
 
@@ -158,6 +175,18 @@ year_ended_inflation_row <- function(inflation) {
     derived_from = inflation,
     derived_transform = "year_ended_sum"
   )
+}
+
+# Add an "All Shocks" shock grouping: each shock on its own, labelled by its
+# description, with any measurement errors (`is_measurement_error`) together
+# as "Measurement errors".
+all_shocks_grouping <- function(shocks) {
+  measurement_error <- if ("is_measurement_error" %in% names(shocks)) {
+    coalesce(as.logical(shocks$is_measurement_error), FALSE)
+  } else {
+    rep(FALSE, nrow(shocks))
+  }
+  mutate(shocks, `All Shocks` = if_else(measurement_error, "Measurement errors", description))
 }
 
 # 0. Smets_Wouters_2007_45 ----------------------------------------------------
@@ -200,13 +229,18 @@ sw_variables <- tribble(
 ) |>
   annualise_rate("robs") |>
   annualise("r") |>
+  insert_after("dy", year_ended_output_growth_row("dy")) |>
   insert_after("pinfobs", year_ended_inflation_row("pinfobs")) |>
   common_cols()
 
-# `Demand/Supply/Monetary` is a shock-grouping column (any column besides
-# `shock`/`description`/`is_measurement_error` is picked up automatically by
-# `ez_hd.available_shock_groupings()` and offered as a "Shock grouping:"
-# choice in the dashboard's Historical Shock Decomposition tab).
+# `Demand/Supply/Monetary` and `All Shocks` are shock-grouping columns (any
+# column besides `shock`/`description`/`is_measurement_error` is picked up
+# automatically by `ez_hd.available_shock_groupings()` and offered as a
+# "Shock grouping:" choice in the dashboard's Historical Shock Decomposition
+# tab). `All Shocks` shows each shock on its own, by its description, except
+# that measurement errors (`is_measurement_error`) would share one
+# "Measurement errors" group. SW has none: it is estimated with seven
+# structural shocks for its seven observables.
 #
 # The anticipated monetary policy shocks (`em_1`, `em_2`, ...) deliberately
 # have no rows here: ezdyn finds them by their codes for the policy
@@ -222,7 +256,8 @@ sw_shocks <- tribble(
   "em",     "Monetary policy shock",                   "Monetary",
   "epinf",  "Price markup shock",                      "Supply",
   "ew",     "Wage markup shock",                       "Supply"
-)
+) |>
+  all_shocks_grouping()
 
 # Parameters sheet (documentation only - ezdyn ignores this sheet)
 sw_parameter_descriptions <- tribble(
@@ -442,6 +477,7 @@ ireland2004_variables <- tribble(
 ) |>
   annualise_rate("rhat") |>
   insert_after("pihat", year_ended_inflation_row("pihat")) |>
+  insert_after("ghat", year_ended_output_growth_row("ghat")) |>
   insert_after("yhat", alias_row("hours", "Hours Worked", "Per cent deviation from steady state", "yhat")) |>
   common_cols() |>
   mutate(irf = dynare_name != "yhat")

@@ -173,14 +173,15 @@ headline <- function(data) {
 
 # One build's dashboard data, with its loss-function targets as known then
 # (`<display name> target`): the Fed's 2% a year inflation target (0.5% a
-# quarter), and its NAIRU and potential growth (as quarterly growth)
-# estimates.
+# quarter), and its NAIRU and potential growth (as quarterly and year-ended
+# log growth x 100, each rounded to 2 significant figures) estimates.
 dashboard_levels <- function(us) {
   headline(us$data) |>
     mutate(
       `Inflation target` = inflation_target / 4,
       `Unemployment Rate target` = us$nairu,
-      `Output Growth target` = quarterly_growth(us$potential_growth)
+      `Output Growth target` = signif(quarterly_growth(us$potential_growth), 2),
+      `Output Growth (year-ended) target` = signif(4 * quarterly_growth(us$potential_growth), 2)
     )
 }
 
@@ -218,10 +219,14 @@ timeline <- tibble(
 #   - Unemployment Rate: less the Fed's NAIRU estimate, in percentage points.
 #     Used by Gali Unemployment (2010)
 #   - Output Growth: less the Fed's potential growth estimate
+#   - Output Growth (year-ended): the sum of the last four quarters' Output
+#     Growth (as the dashboard derives it), less the potential growth
+#     estimate over a year
 #   - Output: SW's model-consistent output has no data counterpart, so, as in
 #     the dashboard baseline, it stays at its steady state, also its target
 # The rate itself (`Nominal Interest Rate`) is kept for the ELB constraint.
-# `levels` must start before `vintage`, so the first rate change is defined.
+# `levels` must start at least three quarters before `vintage`, so the first
+# rate change and year-ended growth are defined.
 loss_gaps <- function(levels, vintage) {
   levels |>
     transmute(
@@ -230,6 +235,8 @@ loss_gaps <- function(levels, vintage) {
       `Nominal Interest Rate Changes_gap_loss` = `Nominal Interest Rate` - lag(`Nominal Interest Rate`),
       `Unemployment Rate_gap_loss` = `Unemployment Rate` - `Unemployment Rate target`,
       `Output Growth_gap_loss` = `Output Growth` - `Output Growth target`,
+      `Output Growth (year-ended)_gap_loss` = `Output Growth` + lag(`Output Growth`) + lag(`Output Growth`, 2) +
+        lag(`Output Growth`, 3) - `Output Growth (year-ended) target`,
       `Output_gap_loss` = 0,
       `Nominal Interest Rate`
     ) |>
@@ -258,10 +265,10 @@ if (anyNA(vintages)) stop("The loss-function vintages are incomplete.", call. = 
 # vintages'.
 current_levels <- dashboard_levels(current)
 targets <- tibble(
-  variable = c("Inflation", "Unemployment Rate", "Output Growth", "Nominal Interest Rate Changes"),
+  variable = c("Inflation", "Unemployment Rate", "Output Growth", "Output Growth (year-ended)", "Nominal Interest Rate Changes"),
   target = c(
     current_levels$`Inflation target`[[1]], current_levels$`Unemployment Rate target`[[1]],
-    current_levels$`Output Growth target`[[1]], 0
+    current_levels$`Output Growth target`[[1]], current_levels$`Output Growth (year-ended) target`[[1]], 0
   )
 )
 

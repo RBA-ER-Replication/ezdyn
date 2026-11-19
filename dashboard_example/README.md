@@ -90,7 +90,7 @@ Projections (SEP). `inputs/us_baseline.xlsx` has six sheets:
 | `baseline` | History and forecast in display names and units: headline growth rates, hours relative to their long-run level, the annualised nominal rate, and "Unemployment Rate" | The dashboard baseline ("Unemployment Rate" is Gali Unemployment (2010)'s) |
 | `model_data` | The same data in Smets-Wouters' own definitions and Dynare names: per-person growth rates, demeaned hours, the quarterly rate `robs` | Re-running SW over current data and forecasts (e.g. for shock decompositions) |
 | `timeline` | `data_start`, `data_end`, `forecast_start`, `forecast_end` | The dashboard timeline |
-| `targets` | The current loss-function targets in display units: inflation 0.5% a quarter (2% a year), unemployment and output growth at the latest SEP longer-run rates, no rate change | The Optimal Policy tab's default targets |
+| `targets` | The current loss-function targets in display units: inflation 0.5% a quarter (2% a year), unemployment and output growth (quarterly and year-ended) at the latest SEP longer-run rates, no rate change | The Optimal Policy tab's default targets |
 | `vintages` | Loss-function gaps (each variable less its target at the time) in each of the last 12 quarters' baselines, in display units | Optimal Policy's timeless commitment |
 | `vintage_levels` | `baseline` as known in each of the last 12 quarters, plus that quarter's targets (`<display name> target`) | The source of `vintages` |
 
@@ -205,17 +205,19 @@ name and in dashboard units, as `vintage` and `date` rows:
 | `Nominal Interest Rate Changes_gap_loss` | Quarterly change in the annualised fed funds rate | No change |
 | `Unemployment Rate_gap_loss` | Unemployment rate less the target, in percentage points | The Fed's NAIRU estimate at the time: the SEP's longer-run unemployment median (`UNRATEMDLR`) in that quarter |
 | `Output Growth_gap_loss` | Quarterly real GDP growth less the target | The Fed's estimate of potential growth at the time: the SEP's longer-run GDP growth median (`GDPC1MDLR`) in that quarter, converted to a quarterly log change |
+| `Output Growth (year-ended)_gap_loss` | Real GDP growth over the last four quarters (the sum of quarterly growth) less the target | The same potential growth estimate, as a log change over the year |
 | `Output_gap_loss` | Zero: SW's "Output" has no data and stays at steady state, as in the baseline | Steady state |
 
 It also has `Nominal Interest Rate` (annualised), the instrument's level, for
 the ELB. `vintage_levels` holds each vintage's `baseline` columns and its
 targets, in display units: `Inflation target`, `Unemployment Rate target`
-(that NAIRU estimate) and `Output Growth target` (that potential growth
-estimate, as a quarterly log change). Each gap in `vintages` is the level
-less its target.
+(that NAIRU estimate), and `Output Growth target` and `Output Growth
+(year-ended) target` (that potential growth estimate, as quarterly and
+year-ended log changes). Each gap in `vintages` is the level less its target.
 
 Commitment needs a vintage column for every loss variable selected, so the
-tab offers only these five as loss variables. "Unemployment Rate" is offered
+tab offers only these six as loss variables (Inflation, Output Growth and
+Nominal Interest Rate Changes by default). "Unemployment Rate" is offered
 only while Gali Unemployment (2010), the only model with it, is the only
 model selected. Its baseline is the US unemployment rate (the `baseline`
 sheet's "Unemployment Rate", history then the path to the SEP), not the
@@ -271,6 +273,7 @@ inflation fall after an RR shock. After a GK shock they rise slightly at first
 | `ygap` | Output Gap | Output gap response (%) |
 | `output` | Output | Same as the output gap (the shock doesn't move potential output) |
 | `dy` | Output Growth | Quarterly change in the output gap |
+| `dy_ye` | Output Growth (year-ended) | Sum of the last four quarters of `dy` |
 | `pinfobs` | Inflation | Annualised inflation / 4 |
 | `pinfobs_ye` | Inflation (year-ended) | Sum of the last four quarters of `pinfobs` |
 | `robs` | Nominal Interest Rate | Fed funds rate (stored as fed funds rate / 4, shown x 4) |
@@ -285,11 +288,12 @@ scaled so the fed funds rate peaks 100bp (annualised) above baseline.
 
 - **Impulse Response Library**: responses to the "Monetary policy shock",
   comparable with the other models.
-- **Optimal Policy**: Gertler-Karadi (2015) is selected by default alongside
-  SW, so its optimal path is shown next to SW's. While it is selected, the
-  tab doesn't offer response or loss variables it lacks (e.g. real wage
-  growth). Because output and inflation rise at first after a GK rate rise,
-  its optimal path can move rates the opposite way to SW's in the short run.
+- **Optimal Policy**: Romer-Romer (2004) is selected by default, alongside SW
+  and Gali NK+Wage (Ch.6), so its optimal path is shown next to theirs.
+  Gertler-Karadi (2015) is selectable. While either is selected, the tab
+  doesn't offer response or loss variables it lacks (e.g. real wage growth).
+  Because output and inflation rise at first after a GK rate rise, GK's
+  optimal path can move rates the opposite way to SW's in the short run.
   Beyond the first few years its path is unreliable: with a 40-quarter horizon
   and no ELB, it keeps cutting, to about -23% by quarter 40, because cuts that
   late only take effect after the loss horizon ends. Turn on the ELB or shorten
@@ -359,12 +363,16 @@ says so. To change the number, edit `n_anticipated` at the top of
 
 ### In the dashboard
 
-- **Optimal Policy**: with the Anticipation Parameter above 0, Smets-Wouters
-  uses its anticipated shocks, so commitment, timeless commitment and
-  discretion give different paths. The other models only have surprise
-  policy shocks, so the tab shows one optimal path for each of them.
+- **Optimal Policy**: SW is selected by default, with Gali NK+Wage (Ch.6) and
+  Romer-Romer (2004). With the
+  Anticipation Parameter above 0 (0.8 by default), Smets-Wouters uses its
+  anticipated shocks, so commitment, timeless commitment and discretion give
+  different paths. The other models only have surprise policy shocks, so the
+  tab shows one optimal path for each of them. The tab plots year-ended
+  inflation and output growth and the nominal interest rate by default.
 - **Alternative Paths**: "Use anticipated shocks when supported" uses `em_1`
-  to `em_10`, one per quarter of the window.
+  to `em_10`, one per quarter of the window, with the cognitive discounting
+  parameter at 0.8 by default. It plots the same three variables by default.
 - **Impulse Response Library**: Custom IRF's cognitive discounting uses
   them. The shocks have no metadata rows, so the shock lists don't offer
   them.
@@ -372,11 +380,17 @@ says so. To change the number, edit `n_anticipated` at the top of
   smoother don't use them (zero variance), so their smoothed values are zero,
   and `build_sw_anticipated.m` stops if they aren't. The decomposition is the
   same as the original model's, with zero contributions from the anticipated
-  shocks.
+  shocks. They have no metadata rows, so every shock grouping puts them in
+  "Other", with a zero contribution.
+- **Shock groupings**: SW's metadata offers two: "Demand/Supply/Monetary",
+  and "All Shocks", which shows each shock on its own. "All Shocks" would put
+  any measurement errors (`is_measurement_error`) together in one
+  "Measurement errors" group, but SW has none: it is estimated with seven
+  structural shocks for its seven observables.
 
 ## Common variables
 
-Every DSGE model (Smets-Wouters and the 7 Pfeifer models) has these eight
+Every DSGE model (Smets-Wouters and the 7 Pfeifer models) has these nine
 variables under the same name and units, so they can be compared across
 models in the Impulse Response Library and Alternative Paths:
 
@@ -390,6 +404,7 @@ models in the Impulse Response Library and Alternative Paths:
 | Hours Worked | Per cent deviation from steady state |
 | Output | Per cent deviation from steady state |
 | Output Growth | Per cent (quarterly) |
+| Output Growth (year-ended) | Per cent (year-ended) |
 
 Each comes from the model variable below. In every model:
 
@@ -407,6 +422,11 @@ Each comes from the model variable below. In every model:
   change in "Output" (the `diff` transform): the deviation of output growth
   from trend, as SW's `dy` is (`dy = y - y(-1)` plus a constant trend). In
   the US baseline it is real GDP growth.
+- "Output Growth (year-ended)" is output growth over the last four quarters:
+  the sum of the last four quarters of SW's and Ireland's own output growth
+  (the `year_ended_sum` transform), and in every other model the change in
+  "Output" over four quarters (the `year_ended_change` transform), which is
+  the same thing (ezdyn can't derive a variable from a derived one).
 - Every other interest rate is annualised the same way (x 4): the Gali
   models', Ascari-Sbordone's and Born-Pfeifer's real and natural rates, and
   SW's model-consistent nominal rate `r`.
@@ -416,8 +436,8 @@ Custom IRF targets and Optimal Policy rate settings (loss targets, bounds and
 the 0.1% ELB) are all in annual per cent.
 
 The semi-structural models also have "Inflation (year-ended)", "Nominal
-Interest Rate (quarterly)", "Nominal Interest Rate Changes" and "Output
-Growth" (see their Variables table above).
+Interest Rate (quarterly)", "Nominal Interest Rate Changes", "Output Growth"
+and "Output Growth (year-ended)" (see their Variables table above).
 
 | Model | Inflation | Nominal Interest Rate | Hours Worked | Output |
 |---|---|---|---|---|

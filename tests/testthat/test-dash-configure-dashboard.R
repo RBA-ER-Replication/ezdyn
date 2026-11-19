@@ -200,6 +200,30 @@ testthat::test_that("configure_dashboard validates Alternative Paths model selec
   )
 })
 
+testthat::test_that("configure_dashboard sets Alternative Paths' default responses and anticipation parameter", {
+  arguments <- list(
+    models = list(DINGO = dashboard_test_model("DINGO")),
+    timeline = dashboard_test_timeline(),
+    baselines = list(Staff = dashboard_test_baseline()),
+    default_baseline = "Staff"
+  )
+
+  config <- do.call(configure_dashboard, arguments)
+  testthat::expect_null(config$alt_paths$defaults$display_names)
+  testthat::expect_equal(config$alt_paths$defaults$lambda, 0.8)
+
+  config <- do.call(configure_dashboard, c(arguments, list(alt_paths = list(defaults = list(display_names = "Cash Rate", lambda = 0.5)))))
+  testthat::expect_equal(config$alt_paths$defaults$display_names, "Cash Rate")
+  testthat::expect_equal(config$alt_paths$defaults$lambda, 0.5)
+
+  for (invalid in list(list(lambda = 2), list(lambda = "high"), list(display_names = 1))) {
+    testthat::expect_error(
+      do.call(configure_dashboard, c(arguments, list(alt_paths = list(defaults = invalid)))),
+      "alt_paths\\$defaults` contains invalid"
+    )
+  }
+})
+
 testthat::test_that("configure_dashboard validates Variable Dictionary model selection", {
   arguments <- list(
     models = list(DINGO = dashboard_test_model("DINGO"), MARTIN = dashboard_test_model("MARTIN")),

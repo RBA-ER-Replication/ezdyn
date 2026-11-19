@@ -79,7 +79,11 @@ is an optional function returning UI shown above the HSD chart; `NULL`
 \item{alt_paths}{Alternative Policy Paths model-selection configuration.
 `alt_paths$models` is the eligible model allow-list offered by the tab's
 model selector (defaults to every configured model); `alt_paths$defaults$models`
-is the selector's initial selection (defaults to every eligible model).}
+is the selector's initial selection (defaults to every eligible model).
+`alt_paths$defaults$display_names` sets the initially plotted response
+variables (defaults to `irf$defaults$display_names`), and
+`alt_paths$defaults$lambda` the initial cognitive-discounting
+(anticipation) parameter (defaults to 0.8).}
 
 \item{dictionary}{Variable Dictionary model-selection configuration.
 `dictionary$models` is the eligible model allow-list offered by the tab's
