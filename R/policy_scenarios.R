@@ -710,9 +710,13 @@ ezdyn_apply_policy_shocks <- function(dY, shocks) {
   matrix(response, nrow = dimensions[1], ncol = dimensions[2])
 }
 
+# Stack constraints as rows of `A_ineq %*% shocks <= b_ineq`. `period` gives
+# each row's quarter (1 = the first quarter of `dY`), which timeless
+# commitment needs to tell past from future constraints.
 ezdyn_policy_constraints <- function(constraints, dY, Y0) {
   A_ineq <- matrix(0, 0, dim(dY)[3])
   b_ineq <- numeric()
+  row_period <- integer()
   for (constraint in constraints) {
     index <- match(constraint$variable, dimnames(dY)[[1]])
     if (is.na(index) || !(constraint$direction %in% c("lower", "upper"))) {
@@ -727,9 +731,10 @@ ezdyn_policy_constraints <- function(constraints, dY, Y0) {
       }
       A_ineq <- rbind(A_ineq, A)
       b_ineq <- c(b_ineq, b)
+      row_period <- c(row_period, as.integer(period))
     }
   }
-  list(A_ineq = A_ineq, b_ineq = b_ineq)
+  list(A_ineq = A_ineq, b_ineq = b_ineq, period = row_period)
 }
 
 ezdyn_validate_policy_solution <- function(constraints, dY, Y0, shocks) {
@@ -1198,11 +1203,12 @@ ezdyn_policy_timeless_constraints <- function(constraints, dY, Y0, vintages, pre
       Y0[instrument_variable, , drop = FALSE]
     )
   }
+  none <- function(remaining) list(A_ineq = matrix(0, 0, remaining), b_ineq = numeric(), period = integer())
   lapply(seq_len(preloss + 1L), function(period) {
     remaining <- dim(dY)[3] - period + 1L
     historical_period <- lapply(historical, function(x) { x$period <- seq_len(remaining); x })
-    current_data <- if (period == preloss + 1L) ezdyn_policy_constraints(current, dY[, seq_len(horizon), seq_len(dim(dY)[3] - preloss), drop = FALSE], Y0) else list(A_ineq = matrix(0, 0, remaining), b_ineq = numeric())
-    history_data <- if (length(historical) == 0) list(A_ineq = matrix(0, 0, remaining), b_ineq = numeric()) else ezdyn_policy_constraints(
+    current_data <- if (period == preloss + 1L) ezdyn_policy_constraints(current, dY[, seq_len(horizon), seq_len(dim(dY)[3] - preloss), drop = FALSE], Y0) else none(remaining)
+    history_data <- if (length(historical) == 0) none(remaining) else ezdyn_policy_constraints(
       historical_period,
       dY[instrument_variable, seq_len(remaining), seq_len(remaining), drop = FALSE],
       matrix(
@@ -1211,7 +1217,11 @@ ezdyn_policy_timeless_constraints <- function(constraints, dY, Y0, vintages, pre
         dimnames = list(instrument_variable, NULL)
       )
     )
-    list(A_ineq = rbind(history_data$A_ineq, current_data$A_ineq), b_ineq = c(history_data$b_ineq, current_data$b_ineq))
+    list(
+      A_ineq = rbind(history_data$A_ineq, current_data$A_ineq),
+      b_ineq = c(history_data$b_ineq, current_data$b_ineq),
+      period = c(history_data$period, current_data$period)
+    )
   })
 }
 
@@ -1238,7 +1248,18 @@ ezdyn_policy_timeless <- function(history, dY, weights, discount_factor, constra
     shocks <- solution$shocks
     expectation <- Y0 + as.numeric(response %*% shocks)
     expectation_lagged <- expectation[(n_loss + 1):length(expectation)]
-    multiplier <- -crossprod(constraints[[period]]$A_ineq, solution$multiplier)
+    # Carry forward only the multipliers on constraints dated after this
+    # quarter. Those constraints reappear, with fresh multipliers, in the
+    # next quarter's problem, so their old multipliers enter its first-order
+    # condition with the opposite sign. This quarter's constraints are past
+    # by then: their effect is already captured by measuring the next
+    # quarter's loss against this plan's expected path (`expectation_lagged`),
+    # so carrying them too would count them twice.
+    future <- constraints[[period]]$period > 1L
+    multiplier <- -crossprod(
+      constraints[[period]]$A_ineq[future, , drop = FALSE],
+      solution$multiplier[future]
+    )
     multiplier_lagged <- multiplier[-1] / discount_factor
   }
   shocks

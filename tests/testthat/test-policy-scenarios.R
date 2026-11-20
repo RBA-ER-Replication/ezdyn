@@ -663,3 +663,99 @@ testthat::test_that("a failing strategy is omitted with a warning, and the rest 
   testthat::expect_equal(actual, expected)
   testthat::expect_error(run(list(bad)), "Omitted `Optimal (A)` for model `A`: `loss_weights` must be", fixed = TRUE)
 })
+
+# Responses at t to an anticipated policy shock dated j: both the rate and
+# inflation move before the shock's date (t < j), as well as after.
+policy_test_anticipated_irf <- function(dates) {
+  dY <- array(0, c(2, dates, dates), list(c("pi", "r"), NULL, NULL))
+  for (t in seq_len(dates)) {
+    for (j in seq_len(dates)) {
+      k <- t - j
+      dY["r", t, j] <- if (k >= 0) 0.5^k else -0.1 * 0.5^(-k)
+      dY["pi", t, j] <- if (k >= 0) -0.3 * 0.6^k else -0.2 * 0.5^(-k)
+    }
+  }
+  dY
+}
+
+testthat::test_that("timeless commitment with no news keeps the previous plan, carrying forward only future constraints' multipliers", {
+  dates <- 5L # one quarter of commitment history, then four forecast quarters
+  dY <- policy_test_anticipated_irf(dates)
+  beta <- 0.99
+  # A lower bound on the rate, assumed to apply in every vintage.
+  bounds <- function(Y0, n) {
+    ezdyn_policy_constraints(
+      list(list(direction = "lower", variable = "r", value = 0.25, period = seq_len(n))),
+      dY[, seq_len(n), seq_len(n), drop = FALSE],
+      Y0
+    )
+  }
+  loss_history <- function(values) array(values, c(1, dim(values)[2], dim(values)[3]), list("pi", NULL, NULL))
+
+  # The plan made a quarter before the forecast start, which hits the bound.
+  Y0_first <- rbind(pi = c(-1, -0.8, -0.5, -0.3, -0.1), r = c(0.3, 0.5, 0.8, 1, 1.2))
+  first <- ezdyn_policy_timeless(
+    loss_history(array(Y0_first["pi", ], c(1, dates, 1))),
+    dY["pi", , , drop = FALSE], 1, beta, list(bounds(Y0_first, dates))
+  )
+  expected <- Y0_first + rbind(pi = as.numeric(dY["pi", , ] %*% first), r = as.numeric(dY["r", , ] %*% first))
+  testthat::expect_equal(expected[["r", 1]], 0.25, tolerance = 1e-6)
+
+  # The next quarter's forecast is exactly what that plan expected: no news.
+  history <- array(NA_real_, c(1, dates, 2))
+  history[1, , 1] <- Y0_first["pi", ]
+  history[1, 2:dates, 2] <- expected["pi", 2:dates]
+  second <- ezdyn_policy_timeless(
+    loss_history(history),
+    dY["pi", , , drop = FALSE], 1, beta,
+    list(bounds(Y0_first, dates), bounds(expected[, 2:dates, drop = FALSE], dates - 1L))
+  )
+
+  # So the timeless policymaker keeps the plan: no new shocks.
+  testthat::expect_equal(second, rep(0, dates - 1L), tolerance = 1e-6)
+})
+
+testthat::test_that("timeless commitment after news matches the textbook lagged-multiplier problem", {
+  dates <- 5L
+  beta <- 0.99
+  dY <- policy_test_anticipated_irf(dates)
+  bounds <- function(Y0, n) {
+    ezdyn_policy_constraints(
+      list(list(direction = "lower", variable = "r", value = 0.25, period = seq_len(n))),
+      dY[, seq_len(n), seq_len(n), drop = FALSE],
+      Y0
+    )
+  }
+  qp <- function(R, Y0, lagged, constraints) {
+    W <- diag(beta^(seq_len(nrow(R)) - 1))
+    H <- crossprod(R, W %*% R)
+    ezdyn_policy_constrained_solution((H + t(H)) / 2, crossprod(R, W %*% Y0) + lagged, constraints)
+  }
+
+  # The first plan, which keeps the rate at its bound for four quarters.
+  Y0_first <- rbind(pi = c(-1, -0.8, -0.5, -0.3, -0.1), r = c(0.3, 0.5, 0.8, 1, 1.2))
+  first_bounds <- bounds(Y0_first, dates)
+  first <- qp(dY["pi", , ], Y0_first["pi", ], 0, first_bounds)
+  expected <- Y0_first + rbind(pi = as.numeric(dY["pi", , ] %*% first$shocks), r = as.numeric(dY["r", , ] %*% first$shocks))
+
+  # Next quarter, inflation comes in higher than the plan expected.
+  Y0_second <- expected[, 2:dates]
+  Y0_second["pi", ] <- Y0_second["pi", ] + c(0.6, 0.5, 0.4, 0.3)
+  second_bounds <- bounds(Y0_second, dates - 1L)
+  history <- array(NA_real_, c(1, dates, 2), list("pi", NULL, NULL))
+  history[1, , 1] <- Y0_first["pi", ]
+  history[1, 2:dates, 2] <- Y0_second["pi", ]
+  actual <- ezdyn_policy_timeless(history, dY["pi", , , drop = FALSE], 1, beta, list(first_bounds, second_bounds))
+
+  # The textbook timeless problem: next quarter's own loss and constraints,
+  # plus the first plan's terms for the quarter now past - its loss and its
+  # binding constraints - carried forward (divided by the discount factor).
+  # The bound has one row per quarter, in order, so the first row is the
+  # quarter now past.
+  past <- seq_len(nrow(first_bounds$A_ineq)) == 1L
+  lagged <- (dY["pi", 1, 2:dates] * expected[["pi", 1]] +
+    as.numeric(crossprod(first_bounds$A_ineq[past, 2:dates, drop = FALSE], first$multiplier[past]))) / beta
+  textbook <- qp(dY["pi", 1:(dates - 1L), 1:(dates - 1L)], Y0_second["pi", ], lagged, second_bounds)
+
+  testthat::expect_equal(actual, textbook$shocks, tolerance = 1e-6)
+})
