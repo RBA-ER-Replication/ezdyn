@@ -52,6 +52,9 @@
 library(dplyr)
 library(tibble)
 
+# The info buttons' help guides (`usa_help()`); add more there.
+source("help_text.R", local = TRUE, encoding = "UTF-8")
+
 sw_dynare_path <- "inputs/SW_2007_45.json"
 sw_metadata_path <- "inputs/variable_metadata.xlsx"
 # The three workbooks build_us_baseline.R writes: the data (not tracked in
@@ -294,6 +297,9 @@ usa_dashboard <- function() {
       "Report issue" = feedback_url
     ),
     startup_modal = usa_startup_modal,
+    # Alternative Policy Paths' info buttons on anticipated shocks and the
+    # cognitive discounting parameter.
+    help = list(anticipated_shocks = usa_help("anticipated_shocks")),
     # The first display name is the Custom IRF mode's default target. The
     # nominal rate is native to every model, whereas "Inflation" is derived in
     # some and so can't be targeted.
@@ -323,6 +329,16 @@ usa_dashboard <- function() {
       # It defaults to 0.8; other models always use surprise shocks.
       use_cd = TRUE,
       lambda = 0.8,
+      # The tab's info buttons (help guides in help_text.R).
+      help = list(
+        cd = usa_help("anticipated_shocks"),
+        strategy = helpmodal_strategy,
+        loss_variables = helpmodal_loss_variables,
+        loss_horizon = helpmodal_loss_horizon,
+        instrument_horizon = helpmodal_instrument_horizon,
+        constraints = helpmodal_constraints,
+        commitment_start = helpmodal_commitment_start
+      ),
       forecast_end = timeline$data_end,
       # Without vintages these are NULL: the commitment start defaults to the
       # forecast start, and Commitment is ordinary commitment.
