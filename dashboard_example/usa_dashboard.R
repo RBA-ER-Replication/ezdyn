@@ -329,8 +329,16 @@ usa_dashboard <- function() {
       # It defaults to 0.8; other models always use surprise shocks.
       use_cd = TRUE,
       lambda = 0.8,
-      # Its info button explains anticipated shocks and the parameter.
-      help = list(cd = usa_help("anticipated_shocks")),
+      # The tab's info buttons (help guides in help_text.R).
+      help = list(
+        cd = usa_help("anticipated_shocks"),
+        strategy = helpmodal_strategy,
+        loss_variables = helpmodal_loss_variables,
+        loss_horizon = helpmodal_loss_horizon,
+        instrument_horizon = helpmodal_instrument_horizon,
+        constraints = helpmodal_constraints,
+        commitment_start = helpmodal_commitment_start
+      ),
       forecast_end = timeline$data_end,
       # Without vintages these are NULL: the commitment start defaults to the
       # forecast start, and Commitment is ordinary commitment.

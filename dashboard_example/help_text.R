@@ -13,6 +13,9 @@
 #        anticipation parameter), `strategy`, `loss_variables`,
 #        `loss_horizon`, `instrument_horizon`, `constraints` and
 #        `commitment_start`.
+#   Alternatively, write a function returning a shiny::modalDialog(), like the
+#   helpmodal_*() functions at the end of this file, and use the function
+#   itself in usa_dashboard.R, e.g. `strategy = helpmodal_strategy`.
 #   Buttons without a guide show a generic "no additional help" message.
 
 usa_help_guides <- list(
@@ -72,12 +75,12 @@ helpmodal_strategy <- function() {
     title = "Strategy",
     easyClose = TRUE,
     shiny::div(
-      shiny::p("Under 'commitment', policymakers commit to an optimal state-contingent strategy, rather than re-optimising every period in a purely forward-looking manner. This means they may implement 'make-up' policy. Under 'Advanced options', you can select when this 'commitment' is assumed to have begun. Under 'discretion', policymakers re-optimise every period, letting bygones to bygones. Current policy takes into account the fact that future policymakers will re-optimise, and so it cannot make promises that will not actually be adhered to (i.e. policy might be time-consistent)."),
+      shiny::p("Under 'commitment', policymakers commit to an optimal state-contingent strategy, rather than re-optimising every period in a purely forward-looking manner. This means they may implement 'make-up' policy. Under 'Advanced options', you can select when this 'commitment' is assumed to have begun. Under 'discretion', policymakers re-optimise every period, letting bygones be bygones. Current policy takes into account the fact that future policymakers will re-optimise, and so it cannot make promises that will not actually be adhered to (i.e. policy must be time-consistent)."),
       shiny::p("If policymakers cannot directly influence expectations about future policy (i.e. if the anticipation parameter is 0 or if the model lacks anticipated shocks), then optimal commitment and discretion are identical."),
       shiny::p(
         "See ",
         shiny::tags$a(
-          href = "https://01a1b082-f2eb-61b6-a308-c4c2c0261a0c.share.connect.posit.cloud/",
+          href = "https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true",
           target = "_blank",
           "Sullivan and Ryan 2026"
         ),
@@ -96,9 +99,8 @@ helpmodal_loss_variables <- function() {
     easyClose = TRUE,
     shiny::div(
       shiny::p("Choose the variables that policy is assumed to care about. You can also choose the target values for these variables, and the 'weights', i.e. how much policymakers care about deviations from those target values. 'Optimal policy' is the path that minimises the discounted weighted sum of squared deviations from these target values. Since the deviations are squared, larger deviations are assumed to be disproportionately worse than smaller deviations."),
-      shiny::p("The default variables and values when the tab is first opened reflect the standard loss function that SAMM uses in its optimal policy exercises."),
       shiny::p("Under 'Advanced options', you can adjust the discount factor and the horizon over which the loss is calculated."),
-      shiny::p("Putting 'Cash rate changes' in the loss function will penalise movements in the cash rate. Putting 'Cash rate acceleration' in the loss function will penalise changes in the speed or direction of cash rate changes.")
+      shiny::p("Putting 'Nominal Interest Rate Changes' in the loss function will penalise movements in the policy rate.")
     )
   )
 }
@@ -121,7 +123,7 @@ helpmodal_instrument_horizon <- function() {
   shiny::modalDialog(
     title = "Optimisation horizon",
     easyClose = TRUE,
-    shiny::p("This is how many quarters the cash rate is being optimally chosen. After this horizon, the cash rate follows its estimated policy rule.")
+    shiny::p("This is how many quarters the policy rate is being optimally chosen. After this horizon, the policy rate follows its estimated policy rule.")
   )
 }
 
@@ -132,7 +134,7 @@ helpmodal_constraints <- function() {
   shiny::modalDialog(
     title = "Constraints",
     easyClose = TRUE,
-    shiny::p("Tick the ELB box to impose the effective lower bound on the cash rate. You can also set your own upper or lower bounds on variables below. If you set inconsistent or unachievable constraints, you will get an error.")
+    shiny::p("Tick the ELB box to impose the effective lower bound on the policy rate. You can also set your own upper or lower bounds on variables below. If you set inconsistent or unachievable constraints, you will get an error.")
   )
 }
 
