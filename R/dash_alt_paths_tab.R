@@ -573,12 +573,10 @@ ServerTab_AltPaths <- function(id, config) {
     # within this session. Import or naming failures leave active state intact.
     shiny::observeEvent(input$import_baseline, {
       shiny::req(input$uploaded_baseline)
-      source_label <- if (identical(input$upload_interpretation, "display")) {
-        config$baseline_upload$default_source_model
-      } else {
-        input$upload_source_model
-      }
-      shiny::req(source_label)
+      # A "Default template" upload is in display names, which any model may
+      # use; a "Model input" upload is in the chosen model's codes.
+      display_upload <- identical(input$upload_interpretation, "display")
+      if (!display_upload) shiny::req(input$upload_source_model)
       tryCatch({
         baseline_name <- alt_paths_upload_name(
           input$uploaded_baseline_name,
@@ -586,7 +584,7 @@ ServerTab_AltPaths <- function(id, config) {
         )
         imported <- import_baseline(
           input = input$uploaded_baseline$datapath,
-          source_model = config$models[[source_label]],
+          source_model = if (display_upload) NULL else config$models[[input$upload_source_model]],
           models = config$models
         )
         dashboard_validate_baseline_coverage(imported, config$timeline, baseline_name)

@@ -104,6 +104,18 @@ testthat::test_that("Optimal Policy offers the response display names every sele
   testthat::expect_equal(optimal_policy_response_choices(list()), character())
 })
 
+testthat::test_that("Optimal Policy only offers response variables the baseline has", {
+  with_growth <- dashboard_test_model("DINGO", include_gdp_growth = TRUE)
+  baseline <- data.frame(date = as.Date("2024-03-01"), check.names = FALSE)
+  baseline[["Cash Rate"]] <- 4
+  baseline[["GDP Growth"]] <- 0.5 # no "Inflation" data
+
+  testthat::expect_equal(
+    optimal_policy_response_choices(list(DINGO = with_growth), baseline),
+    c("Cash Rate" = "Cash Rate", "GDP Growth" = "GDP Growth")
+  )
+})
+
 testthat::test_that("Optimal Policy maps the Commitment control to timeless commitment", {
   input <- list(
     strategy_modes = c("timeless", "disc"),
@@ -143,7 +155,7 @@ testthat::test_that("Optimal Policy falls back to ordinary commitment without vi
   testthat::expect_identical(vapply(actual, `[[`, character(1), "commit"), c("commit", "disc"))
 })
 
-testthat::test_that("Optimal Policy allows discretion with a longer loss horizon but not a shorter one", {
+testthat::test_that("Optimal Policy allows a longer loss horizon but not a shorter one", {
   input <- list(
     strategy_modes = "disc",
     loss_horizon = 8L,
@@ -162,13 +174,23 @@ testthat::test_that("Optimal Policy allows discretion with a longer loss horizon
   input$loss_horizon <- 2L
   testthat::expect_error(
     optimal_policy_strategies(input, list(), config),
-    "loss evaluation horizon at least as long as the optimisation horizon \\(currently 2 and 4 quarters\\)"
+    "optimisation horizon \\(4 quarters\\) can't be longer than the loss evaluation horizon \\(2 quarters\\)"
   )
 
-  # Commitment keeps accepting a shorter loss horizon: with anticipated
-  # shocks, later instruments still move the loss through expectations.
+  # Commitment has the same rule.
   input$strategy_modes <- "timeless"
-  testthat::expect_length(optimal_policy_strategies(input, list(), config), 1)
+  testthat::expect_error(optimal_policy_strategies(input, list(), config), "can't be longer than the loss evaluation")
+})
+
+testthat::test_that("the commitment-start slider offers whole quarters only", {
+  policy <- list(preloss_start = as.Date("2024-03-01"), forecast_start = as.Date("2024-12-01"))
+
+  starts <- optimal_policy_commitment_starts(policy)
+
+  testthat::expect_identical(names(starts), c("2024 Q1", "2024 Q2", "2024 Q3", "2024 Q4"))
+  testthat::expect_identical(starts, stats::setNames(seq(as.Date("2024-03-01"), as.Date("2024-12-01"), by = "quarter"), names(starts)))
+  testthat::expect_identical(optimal_policy_commitment_start("2024 Q3", policy), as.Date("2024-09-01"))
+  testthat::expect_identical(optimal_policy_commitment_start(NULL, policy), as.Date("2024-03-01"))
 })
 
 testthat::test_that("Optimal Policy uses the shared two-year plot-range convention", {

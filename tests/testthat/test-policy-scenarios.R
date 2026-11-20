@@ -538,5 +538,128 @@ testthat::test_that("timeless commitment names the vintage columns it is missing
   testthat::expect_no_error(run(elb, fixture$vintages))
 
   short <- fixture$vintages[fixture$vintages$date <= as.Date("2024-03-01"), ]
-  testthat::expect_error(run(fixture$strategy, short), "vintage 2023-12-01 is incomplete: `Inflation_gap_loss` must cover every quarter from 2023-12-01 to 2024-09-01")
+  testthat::expect_error(run(fixture$strategy, short), "vintage 2023-12-01 has no row for 2024-06-01 to 2024-09-01", fixed = TRUE)
+})
+
+# Run the timeless fixture with the given vintages and commitment start.
+policy_timeless_run <- function(vintages, preloss_start = as.Date("2023-12-01"), strategy = NULL) {
+  fixture <- policy_timeless_fixture()
+  get_policy_scenario(
+    if (is.null(strategy)) fixture$strategy else strategy, fixture$baseline,
+    policy_fixture_model(c("r_obs", "infl_obs"), "eps_r"),
+    forecast_start = fixture$dates[[1]], forecast_end = fixture$dates[[4]],
+    loss_variable_vintages = vintages, preloss_start = preloss_start
+  )
+}
+
+testthat::test_that("timeless commitment from the forecast start needs no vintages", {
+  fixture <- policy_timeless_fixture()
+  commit <- fixture$strategy
+  commit$commit <- "commit"
+  expected <- policy_timeless_run(NULL, NULL, commit)
+
+  testthat::expect_equal(policy_timeless_run(NULL, NULL)$value, expected$value)
+  testthat::expect_equal(policy_timeless_run(data.frame(x = 1), fixture$dates[[1]])$value, expected$value)
+  testthat::expect_error(policy_timeless_run(fixture$vintages, as.Date("2024-06-01")), "`preloss_start` (2024-06-01) is after `forecast_start` (2024-03-01)", fixed = TRUE)
+})
+
+testthat::test_that("timeless commitment reads vintage dates in any form, on any day of the quarter", {
+  fixture <- policy_timeless_fixture()
+  expected <- policy_timeless_run(fixture$vintages)$value
+  with_keys <- function(vintage, date) {
+    vintages <- fixture$vintages
+    vintages$vintage <- vintage
+    vintages$date <- date
+    vintages
+  }
+  days <- format(fixture$vintages$date)
+  quarter_starts <- seq(as.Date("2023-10-01"), by = "quarter", length.out = 5)
+
+  variants <- list(
+    utc = with_keys(as.POSIXct("2023-12-01", tz = "UTC"), as.POSIXct(days, tz = "UTC")),
+    sydney = with_keys(as.POSIXct("2023-12-01", tz = "Australia/Sydney"), as.POSIXct(days, tz = "Australia/Sydney")),
+    quarter_start = with_keys(as.Date("2023-10-01"), quarter_starts),
+    mid_quarter = with_keys(as.Date("2023-11-15"), quarter_starts + 40),
+    strings = with_keys("2023Q4", c("2023Q4", "2024Q1", "2024Q2", "2024Q3", "2024Q4")),
+    iso = with_keys("2023-12-01", days)
+  )
+  for (name in names(variants)) {
+    testthat::expect_equal(policy_timeless_run(variants[[name]])$value, expected, label = name)
+  }
+  testthat::expect_equal(policy_timeless_run(fixture$vintages, as.Date("2023-10-17"))$value, expected)
+})
+
+testthat::test_that("timeless commitment rejects blank, duplicate and unreadable vintage dates", {
+  fixture <- policy_timeless_fixture()
+  vintages <- fixture$vintages
+
+  blank_vintage <- vintages
+  blank_vintage$vintage[2] <- NA
+  testthat::expect_error(policy_timeless_run(blank_vintage), "The vintages' `vintage` column is blank in row(s) 2.", fixed = TRUE)
+  blank_date <- vintages
+  blank_date$date[c(3, 5)] <- NA
+  testthat::expect_error(policy_timeless_run(blank_date), "The vintages' `date` column is blank in row(s) 3, 5.", fixed = TRUE)
+
+  repeated <- vintages[2, ]
+  repeated$Inflation_gap_loss <- 99
+  duplicate <- rbind(vintages, repeated)
+  testthat::expect_error(policy_timeless_run(duplicate), "more than one row for vintage 2023-12-01, date 2024-03-01 (rows 2, 6)", fixed = TRUE)
+  # Two days in the same quarter are the same quarter.
+  repeated$date <- as.Date("2024-02-01")
+  same_quarter <- rbind(vintages, repeated)
+  testthat::expect_error(policy_timeless_run(same_quarter), "date 2024-03-01 (rows 2, 6)", fixed = TRUE)
+
+  serial <- vintages
+  serial$vintage <- 45261
+  testthat::expect_error(policy_timeless_run(serial), "not numeric values (e.g. Excel date serial numbers", fixed = TRUE)
+  unreadable <- vintages
+  unreadable$date <- c("2023-12-01", "Mar 2024", "2024-06-01", "2024-09-01", "2024-12-01")
+  testthat::expect_error(policy_timeless_run(unreadable), "\"Mar 2024\" in row 2", fixed = TRUE)
+})
+
+testthat::test_that("incomplete vintages are reported by column, vintage and quarter", {
+  fixture <- policy_timeless_fixture()
+
+  blank <- fixture$vintages
+  blank$Inflation_gap_loss[2:3] <- NA
+  testthat::expect_error(policy_timeless_run(blank), "`Inflation_gap_loss` in vintage 2023-12-01 is blank for 2024-03-01 to 2024-06-01", fixed = TRUE)
+
+  # Every problem is listed at once, including a vintage with no rows.
+  gappy <- fixture$vintages[-4, ]
+  gappy$Inflation_gap_loss[2] <- NA
+  error <- tryCatch(
+    ezdyn_policy_history(
+      gappy, "Inflation_gap_loss", as.Date("2023-09-01"), as.Date("2024-03-01"), 3,
+      matrix(0, 1, 3, dimnames = list("Inflation_gap_loss", NULL))
+    ),
+    error = identity
+  )
+  testthat::expect_s3_class(error, "ezdyn_policy_vintage_error")
+  testthat::expect_match(conditionMessage(error), "vintage 2023-09-01 has no rows", fixed = TRUE)
+  testthat::expect_match(conditionMessage(error), "vintage 2023-12-01 has no row for 2024-09-01", fixed = TRUE)
+  testthat::expect_match(conditionMessage(error), "`Inflation_gap_loss` in vintage 2023-12-01 is blank for 2024-03-01", fixed = TRUE)
+
+  text <- fixture$vintages
+  text$Inflation_gap_loss <- as.character(text$Inflation_gap_loss)
+  testthat::expect_error(policy_timeless_run(text), "`Inflation_gap_loss` must be numeric", fixed = TRUE)
+})
+
+testthat::test_that("a failing strategy is omitted with a warning, and the rest still run", {
+  fixture <- policy_timeless_fixture()
+  models <- list(A = policy_fixture_model(c("r_obs", "infl_obs"), "eps_r"))
+  good <- fixture$strategy
+  good$commit <- "commit"
+  bad <- good
+  bad$loss_weights <- c(1, 2)
+  run <- function(strategies) {
+    get_policy_scenarios(
+      strategies, models, fixture$baseline,
+      forecast_start = fixture$dates[[1]], forecast_end = fixture$dates[[4]]
+    )
+  }
+
+  expected <- run(list(good))
+  testthat::expect_warning(actual <- run(list(bad, good)), "Omitted `Optimal (A)` for model `A`: `loss_weights` must be", fixed = TRUE)
+  testthat::expect_equal(actual, expected)
+  testthat::expect_error(run(list(bad)), "Omitted `Optimal (A)` for model `A`: `loss_weights` must be", fixed = TRUE)
 })

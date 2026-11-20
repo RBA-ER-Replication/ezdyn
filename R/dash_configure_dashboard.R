@@ -452,6 +452,69 @@ dashboard_validate_named_numeric <- function(values, name) {
   values
 }
 
+# Warn about vintage problems that would make timeless commitment fail later:
+# a loss-variable choice with no `<choice>_gap_loss` column, gaps from
+# `preloss_start` at the default loss horizon, or no policy-rate level for
+# the ELB. Only warnings: a later commitment start, a shorter horizon or
+# other loss variables may avoid them. A column counts if any model finds it
+# (by display name or by its own code).
+dashboard_check_vintage_coverage <- function(vintages, choices, elb_variable, models, preloss_start, forecast_start, horizon) {
+  locate <- function(variable) {
+    if (variable %in% names(vintages)) return(variable)
+    for (model in models) {
+      column <- tryCatch({
+        resolved <- ezdyn_resolve_policy_variable_names(variable, model$M_)
+        ezdyn_policy_columns(names(vintages), resolved, stats::setNames(list(variable), resolved), model$M_)[[1]]
+      }, error = function(e) NA_character_)
+      if (!is.na(column)) return(column)
+    }
+    NA_character_
+  }
+  problems <- character()
+  gaps <- if (length(choices) > 0) paste0(unname(choices), "_gap_loss") else character()
+  columns <- vapply(gaps, locate, character(1), USE.NAMES = FALSE)
+  if (anyNA(columns)) {
+    problems <- c(problems, sprintf(
+      "there's no %s column, so timeless commitment can't use %s",
+      paste0("`", gaps[is.na(columns)], "`", collapse = ", "),
+      if (sum(is.na(columns)) == 1) "that loss variable" else "those loss variables"
+    ))
+  }
+  columns <- unique(columns[!is.na(columns)])
+  numeric <- vapply(vintages[columns], is.numeric, logical(1))
+  if (any(!numeric)) {
+    problems <- c(problems, sprintf("%s must be numeric", paste0("`", columns[!numeric], "`", collapse = ", ")))
+  }
+  columns <- columns[numeric]
+  if (length(columns) > 0 && preloss_start < forecast_start) {
+    problems <- c(problems, tryCatch({
+      ezdyn_policy_history(
+        vintages, columns, preloss_start, forecast_start, horizon,
+        matrix(0, length(columns), horizon, dimnames = list(columns, NULL))
+      )
+      NULL
+    }, ezdyn_policy_vintage_error = function(condition) {
+      sprintf(
+        "from the earliest commitment start (%s) at a %d-quarter loss horizon: %s",
+        format(preloss_start), horizon, sub("\\.$", "", conditionMessage(condition))
+      )
+    }))
+  }
+  if (is.na(locate(elb_variable))) {
+    problems <- c(problems, sprintf(
+      "there's no policy-rate level column (`%s` or its display name), which timeless commitment needs with the ELB",
+      elb_variable
+    ))
+  }
+  if (length(problems) > 0) {
+    warning(sprintf(
+      "`optimal_policy$loss_variable_vintages` won't support every timeless-commitment choice: %s.",
+      paste(problems, collapse = "; ")
+    ), call. = FALSE)
+  }
+  invisible(NULL)
+}
+
 # Validate the optional Optimal Policy module configuration. The dashboard owns
 # policy-specific baseline preparation; ezdyn owns the resulting calculation.
 dashboard_validate_optimal_policy_config <- function(optimal_policy, models, timeline) {
@@ -538,6 +601,21 @@ dashboard_validate_optimal_policy_config <- function(optimal_policy, models, tim
       !is.character(elb_variable) || length(elb_variable) != 1 || elb_variable == "" ||
       (!is.null(description_ui) && !is.function(description_ui))) {
     stop("`optimal_policy` contains invalid model, horizon, policy, baseline, vintage, choice-list, or help settings.", call. = FALSE)
+  }
+  if (!is.null(loss_variable_vintages)) {
+    # Unreadable, blank or duplicate dates are errors now, rather than when
+    # a user first generates a graph.
+    loss_variable_vintages <- tryCatch(
+      ezdyn_check_vintage_keys(loss_variable_vintages),
+      ezdyn_policy_vintage_error = function(condition) {
+        stop(sprintf("`optimal_policy$loss_variable_vintages`: %s", conditionMessage(condition)), call. = FALSE)
+      }
+    )
+    dashboard_check_vintage_coverage(
+      loss_variable_vintages, loss_variable_choices, elb_variable, models[optimal_policy$models],
+      preloss_start, timeline$forecast_start,
+      horizon = min(40L, length(seq(timeline$forecast_start, forecast_end, by = "quarter")))
+    )
   }
 
   list(
@@ -667,9 +745,11 @@ dashboard_validate_plotters <- function(plotters) {
 #'
 #' * **`baselines`**: a named list of one or more baseline forecasts, each
 #'   built with [import_baseline()], so its columns are display names in the
-#'   dashboard's units. Each must cover every quarter from `data_start` to
-#'   `forecast_end`. Users choose between them, and can upload more, in the
-#'   app.
+#'   dashboard's units. Build one from data in display names - which can then
+#'   hold any of the models' variables - or in one model's own variable codes.
+#'   Each must cover every quarter from `data_start` to `forecast_end`. Users
+#'   choose between them, and can upload more, in the app. Only variables in
+#'   the baseline can be plotted as alternative or optimal policy paths.
 #'
 #' * **`default_baseline`**: the name of the baseline selected when the
 #'   dashboard opens.
@@ -851,8 +931,17 @@ dashboard_validate_plotters <- function(plotters) {
 #'   `instrument_variable`: under timeless commitment the ELB is assumed to
 #'   have applied in every past vintage too, which can call for "make-up"
 #'   policy today. See [get_policy_scenario()] for the full format.
+#'   `configure_dashboard()` stops if the `vintage` or `date` columns can't
+#'   be read as dates, are blank, or repeat a vintage and quarter. It warns,
+#'   but still launches, if a loss-variable choice has no gap column, the
+#'   vintages don't cover every quarter needed from `preloss_start` at the
+#'   default loss horizon, or the policy rate's level is missing. If one
+#'   strategy fails when a graph is generated, the others are still shown,
+#'   with a note explaining what went wrong.
 #' * `preloss_start`: the earliest commitment start the user can choose,
-#'   usually the first vintage (default `timeline$forecast_start`).
+#'   usually the first vintage (default `timeline$forecast_start`). The
+#'   "Commitment start" slider moves a quarter at a time from here to the
+#'   forecast start.
 #'
 #' Advanced, rarely needed:
 #'
@@ -902,8 +991,9 @@ dashboard_validate_plotters <- function(plotters) {
 #'   step of their plus/minus buttons, in the policy rate's units.
 #' * `baseline_upload_source_models`, `default_baseline_upload_source_model`,
 #'   `allow_display_name_upload`: which models users can choose to translate
-#'   an uploaded baseline written in model codes, and whether they can upload
-#'   one already in display names.
+#'   an uploaded baseline written in model codes (the "Model input" option),
+#'   and whether they can upload one already in display names (the "Default
+#'   template" option, which can hold any of the models' variables).
 #' * `help`: `help$anticipated_shocks`, a function returning a
 #'   [shiny::modalDialog()] for Alternative Policy Paths' help buttons.
 #' * `plotters`: the plotting styles offered, from `"ggplot"` (the default)
@@ -951,9 +1041,10 @@ dashboard_validate_plotters <- function(plotters) {
 #' @param r_slider_step Alternative Policy Paths sliders' step.
 #' @param cr_button_step Step of the sliders' plus/minus buttons.
 #' @param baseline_upload_source_models Models users can choose to translate
-#'   an uploaded baseline written in model codes (default: all).
+#'   an uploaded baseline written in model codes (the upload dialog's "Model
+#'   input" option; default: all).
 #' @param default_baseline_upload_source_model The model initially chosen for
-#'   that (default: the first).
+#'   that (default: the first). Uploads in display names don't use it.
 #' @param allow_display_name_upload Whether users can upload a baseline
 #'   already in display names and units (default `TRUE`).
 #' @param dictionary Variable Dictionary settings: a list with `models` and

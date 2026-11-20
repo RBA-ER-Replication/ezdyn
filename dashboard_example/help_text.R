@@ -123,7 +123,7 @@ helpmodal_instrument_horizon <- function() {
   shiny::modalDialog(
     title = "Optimisation horizon",
     easyClose = TRUE,
-    shiny::p("This is how many quarters the policy rate is being optimally chosen. After this horizon, the policy rate follows its estimated policy rule.")
+    shiny::p("This is how many quarters the policy rate is being optimally chosen. After this horizon, the policy rate follows its estimated policy rule. It can't be longer than the loss evaluation horizon.")
   )
 }
 

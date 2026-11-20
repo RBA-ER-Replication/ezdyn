@@ -18,6 +18,11 @@ Then, you can use ezdyn to either:
 Simply provide a list of models and a spreadsheet containing forecast (and the dates).
 
 ```r
+# A baseline whose columns are display names (e.g. "Inflation"), in display
+# units, holding any of the models' variables
+baseline <- import_baseline("baseline.xlsx", models = models)
+
+# Or one written in a single model's own variable codes and units
 baseline <- import_baseline("baseline.xlsx", source_model = model, models = models)
 
 config <- configure_dashboard(
@@ -141,6 +146,10 @@ from its target at the time, e.g.
 |---|---|---|---|
 | 2025-12-01 | 2025-12-01 | 0.40 | 0.3 |
 | 2025-12-01 | 2026-03-01 | 0.35 | 0.3 |
+
+Any day within a quarter stands for that quarter, and date-times as read by
+`readxl::read_excel()` are fine. Vintages are only needed when `preloss_start`
+is before `forecast_start`.
 
 In a dashboard, the Optimal Policy tab offers the variables listed in
 `configure_dashboard(optimal_policy = list(loss_variable_choices = c("Inflation", "Unemployment"), constraint_variable_choices = "Cash Rate", loss_variable_vintages = vintages))`.

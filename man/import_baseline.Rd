@@ -2,32 +2,70 @@
 % Please edit documentation in R/baseline_import.R
 \name{import_baseline}
 \alias{import_baseline}
-\title{Import a canonical baseline for one or more models.}
+\title{Import a baseline forecast for one or more models}
 \usage{
-import_baseline(input, source_model, models, date_col = NULL)
+import_baseline(input, source_model = NULL, models, date_col = NULL)
 }
 \arguments{
-\item{input}{`.xls`/`.xlsx` path or data frame containing a date column and
+\item{input}{\code{.xls}/\code{.xlsx} path or data frame containing a date column and
 baseline values.}
 
-\item{source_model}{Full MOO pair whose metadata defines source columns.}
+\item{source_model}{Optional: a model (a full MOO pair) whose variable codes
+the input uses. \code{NULL} (the default) for a baseline in display names.}
 
-\item{models}{Named list of full MOO pairs that will use the baseline.}
+\item{models}{Named list of models (full MOO pairs) that will use the
+baseline; their display names are the column names accepted.}
 
 \item{date_col}{Optional date-column name or one-based position. When omitted,
-an exact case-insensitive `date` column is used; otherwise the first column
+an exact case-insensitive \code{date} column is used; otherwise the first column
 is used.}
 }
 \value{
-A tibble with a `Date` `date` column followed by unique canonical
-  display-name columns in general units.
+A tibble with a \code{Date} \code{date} column followed by unique display-name
+columns in display units.
 }
 \description{
-Reads an `.xls`/`.xlsx` workbook or in-memory data frame, normalizes a
-standard or `YYYYQq` date column, translates source Dynare names to display
-names, and validates units shared by the target models. The workbook reader
-uses `openxlsx2` first and falls back to `readxl` for legacy `.xls`
-compatibility. Exact display-name input columns are assumed to already be in
-general units and are not rescaled. Exact Dynare-name input columns are
-rescaled once using the source model metadata.
+Reads a baseline - history and forecast, one column per variable - and
+returns it in the form the dashboard and \code{\link[=get_alt_paths]{get_alt_paths()}} use: a \code{date}
+column and one column per variable, named by display name and in display
+units. It works in one of two modes:
+\itemize{
+\item \strong{Display names} (\code{source_model = NULL}, the default): every column is a
+display name of one of \code{models}, already in display units (e.g.
+"Inflation", "Nominal Interest Rate"). Columns are kept as they are, so
+one baseline can hold variables from several models.
+\item \strong{One model's codes} (\code{source_model} given): columns may also be
+\code{source_model}'s own variable codes, in its model units (e.g. \code{pinfobs},
+\code{robs}). They are rescaled once, with its metadata's \code{scale_factor}, and
+renamed to their display names. Display-name columns of \code{source_model}
+or of \code{models} are accepted too.
+}
+
+Columns that match nothing are dropped with a warning. The dates may be in
+a standard date format or as \code{YYYYQq}; workbooks are read with \code{openxlsx2},
+falling back to \code{readxl} for legacy \code{.xls} files.
+
+The baseline also gains every derived variable (e.g. year-ended inflation,
+or the change in the policy rate) that the models' metadata defines from
+columns it has. A column you supply is never replaced, and a column that
+several models could derive comes from the first model (\code{source_model},
+then \code{models} in order) that can.
+
+Finally, it checks that every model sharing a display name gives it the
+same units.
+
+The baseline only has the variables you supply and those derived from
+them: a variable with no baseline data can't be plotted as an alternative
+path.
+}
+\examples{
+\dontrun{
+models <- list("Smets Wouters (2007)" = sw, "Gali Unemployment (2010)" = gali)
+
+# A baseline in display names, with variables from both models
+baseline <- import_baseline("baseline.xlsx", models = models)
+
+# A baseline in Smets-Wouters' own codes and units (e.g. `robs`, quarterly)
+baseline <- import_baseline("sw_data.xlsx", source_model = sw, models = models)
+}
 }

@@ -238,3 +238,107 @@ testthat::test_that("import_baseline rejects invalid dates, models, and unit con
     "Conflicting display units"
   )
 })
+
+# A minimal Dynare-class model with the given variable metadata.
+baseline_test_model <- function(...) {
+  varmeta <- data.frame(..., stringsAsFactors = FALSE)
+  if (!("derived_from" %in% names(varmeta))) varmeta$derived_from <- NA_character_
+  if (!("derived_transform" %in% names(varmeta))) varmeta$derived_transform <- NA_character_
+  if (!("scale_factor" %in% names(varmeta))) varmeta$scale_factor <- 1
+  model <- list(M_ = list(varmeta = varmeta), oo_ = list())
+  class(model$M_) <- "dynare"
+  class(model$oo_) <- "dynare"
+  model
+}
+
+baseline_test_models <- function() {
+  list(
+    A = baseline_test_model(
+      dynare_name = c("r_obs", "infl"),
+      display_name = c("Cash Rate", "Inflation"),
+      units = c("Per cent", "Per cent"),
+      scale_factor = c(4, 1)
+    ),
+    B = baseline_test_model(
+      dynare_name = c("i", "pi", "u"),
+      display_name = c("Cash Rate", "Inflation", "Unemployment Rate"),
+      units = c("Per cent", "Per cent", "Per cent")
+    )
+  )
+}
+
+testthat::test_that("import_baseline in display names keeps every model's display-name columns", {
+  models <- baseline_test_models()
+  input <- data.frame(date = as.Date(c("2024-03-01", "2024-06-01")), check.names = FALSE)
+  input[["Cash Rate"]] <- c(4, 4.25)
+  input[["Unemployment Rate"]] <- c(4.1, 4.2) # only model B has it
+
+  actual <- import_baseline(input, models = models)
+
+  testthat::expect_named(actual, c("date", "Cash Rate", "Unemployment Rate"))
+  testthat::expect_equal(actual[["Cash Rate"]], c(4, 4.25)) # not rescaled
+  testthat::expect_s3_class(actual, "ezdyn_baseline")
+})
+
+testthat::test_that("import_baseline in display names drops model codes, with a hint to use source_model", {
+  models <- baseline_test_models()
+  input <- data.frame(date = as.Date("2024-03-01"), r_obs = 1, check.names = FALSE)
+  input[["Inflation"]] <- 0.5
+
+  testthat::expect_warning(
+    actual <- import_baseline(input, models = models),
+    "Ignoring unknown baseline column\\(s\\): `r_obs`.*supply that model as `source_model`"
+  )
+  testthat::expect_named(actual, c("date", "Inflation"))
+})
+
+testthat::test_that("import_baseline in one model's codes rescales them and keeps other models' display names", {
+  models <- baseline_test_models()
+  input <- data.frame(date = as.Date(c("2024-03-01", "2024-06-01")), r_obs = c(1, 1.0625), check.names = FALSE)
+  input[["Unemployment Rate"]] <- c(4.1, 4.2) # a display name of model B, not of the source model
+
+  actual <- import_baseline(input, source_model = models$A, models = models)
+
+  testthat::expect_named(actual, c("date", "Cash Rate", "Unemployment Rate"))
+  testthat::expect_equal(actual[["Cash Rate"]], c(4, 4.25)) # x 4, model A's scale factor
+  testthat::expect_equal(actual[["Unemployment Rate"]], c(4.1, 4.2))
+})
+
+testthat::test_that("import_baseline derives each variable from the first model that can, across models", {
+  rate_changes <- function(transform, scale) {
+    baseline_test_model(
+      dynare_name = c("r", "dr"),
+      display_name = c("Cash Rate", "Cash Rate Changes"),
+      units = c("Per cent", "Percentage points"),
+      derived_from = c(NA, "r"),
+      derived_transform = c(NA, transform),
+      scale_factor = c(1, scale)
+    )
+  }
+  # Model C derives its year-ended changes from "Cash Rate Changes", which it
+  # only has as a model variable: the value must come from another model.
+  year_ended <- baseline_test_model(
+    dynare_name = c("dr_raw", "dr_ye"),
+    display_name = c("Cash Rate Changes", "Cash Rate Changes (year-ended)"),
+    units = c("Percentage points", "Percentage points"),
+    derived_from = c(NA, "dr_raw"),
+    derived_transform = c(NA, "year_ended_sum")
+  )
+  input <- data.frame(date = as.Date(c("2024-03-01", "2024-06-01", "2024-09-01")), check.names = FALSE)
+  input[["Cash Rate"]] <- c(3, 3.5, 4.5)
+
+  first <- import_baseline(input, models = list(One = rate_changes("diff", 1), Two = rate_changes("diff", 2), C = year_ended))
+  second <- import_baseline(input, models = list(Two = rate_changes("diff", 2), One = rate_changes("diff", 1), C = year_ended))
+
+  testthat::expect_equal(first[["Cash Rate Changes"]], c(3, 0.5, 1))
+  testthat::expect_equal(second[["Cash Rate Changes"]], 2 * c(3, 0.5, 1))
+  testthat::expect_equal(first[["Cash Rate Changes (year-ended)"]], cumsum(c(3, 0.5, 1)))
+})
+
+testthat::test_that("import_baseline explains passing the list of models as source_model", {
+  models <- baseline_test_models()
+  input <- data.frame(date = as.Date("2024-03-01"), check.names = FALSE)
+  input[["Inflation"]] <- 0.5
+
+  testthat::expect_error(import_baseline(input, models), "`source_model` must be one model; pass the list of models as `models = ...`")
+})
