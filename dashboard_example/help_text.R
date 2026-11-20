@@ -60,3 +60,90 @@ usa_help <- function(name) {
     shiny::modalDialog(title = title, size = "l", easyClose = TRUE, footer = shiny::modalButton("Close"), html)
   }
 }
+
+
+
+
+#' Return  Optimal Policy strategy help modal.
+#'
+#' @return Shiny UI returned by `shiny::modalDialog()`.
+helpmodal_strategy <- function() {
+  shiny::modalDialog(
+    title = "Strategy",
+    easyClose = TRUE,
+    shiny::div(
+      shiny::p("Under 'commitment', policymakers commit to an optimal state-contingent strategy, rather than re-optimising every period in a purely forward-looking manner. This means they may implement 'make-up' policy. Under 'Advanced options', you can select when this 'commitment' is assumed to have begun. Under 'discretion', policymakers re-optimise every period, letting bygones to bygones. Current policy takes into account the fact that future policymakers will re-optimise, and so it cannot make promises that will not actually be adhered to (i.e. policy might be time-consistent)."),
+      shiny::p("If policymakers cannot directly influence expectations about future policy (i.e. if the anticipation parameter is 0 or if the model lacks anticipated shocks), then optimal commitment and discretion are identical."),
+      shiny::p(
+        "See ",
+        shiny::tags$a(
+          href = "https://01a1b082-f2eb-61b6-a308-c4c2c0261a0c.share.connect.posit.cloud/",
+          target = "_blank",
+          "Sullivan and Ryan 2026"
+        ),
+        " for more information."
+      )
+    )
+  )
+}
+
+#' Return  Optimal Policy loss-variables help modal.
+#'
+#' @return Shiny UI returned by `shiny::modalDialog()`.
+helpmodal_loss_variables <- function() {
+  shiny::modalDialog(
+    title = "Loss function variables",
+    easyClose = TRUE,
+    shiny::div(
+      shiny::p("Choose the variables that policy is assumed to care about. You can also choose the target values for these variables, and the 'weights', i.e. how much policymakers care about deviations from those target values. 'Optimal policy' is the path that minimises the discounted weighted sum of squared deviations from these target values. Since the deviations are squared, larger deviations are assumed to be disproportionately worse than smaller deviations."),
+      shiny::p("The default variables and values when the tab is first opened reflect the standard loss function that SAMM uses in its optimal policy exercises."),
+      shiny::p("Under 'Advanced options', you can adjust the discount factor and the horizon over which the loss is calculated."),
+      shiny::p("Putting 'Cash rate changes' in the loss function will penalise movements in the cash rate. Putting 'Cash rate acceleration' in the loss function will penalise changes in the speed or direction of cash rate changes.")
+    )
+  )
+}
+
+#' Return Optimal Policy loss-horizon help modal.
+#'
+#' @return Shiny UI returned by `shiny::modalDialog()`.
+helpmodal_loss_horizon <- function() {
+  shiny::modalDialog(
+    title = "Loss evaluation horizon",
+    easyClose = TRUE,
+    shiny::p("This is how many quarters policy takes into account when calculating the loss.")
+  )
+}
+
+#' Return  Optimal Policy optimisation-horizon help modal.
+#'
+#' @return Shiny UI returned by `shiny::modalDialog()`.
+helpmodal_instrument_horizon <- function() {
+  shiny::modalDialog(
+    title = "Optimisation horizon",
+    easyClose = TRUE,
+    shiny::p("This is how many quarters the cash rate is being optimally chosen. After this horizon, the cash rate follows its estimated policy rule.")
+  )
+}
+
+#' Return  Optimal Policy constraints help modal.
+#'
+#' @return Shiny UI returned by `shiny::modalDialog()`.
+helpmodal_constraints <- function() {
+  shiny::modalDialog(
+    title = "Constraints",
+    easyClose = TRUE,
+    shiny::p("Tick the ELB box to impose the effective lower bound on the cash rate. You can also set your own upper or lower bounds on variables below. If you set inconsistent or unachievable constraints, you will get an error.")
+  )
+}
+
+#' Return  Optimal Policy commitment-start help modal.
+#'
+#' @return Shiny UI returned by `shiny::modalDialog()`.
+helpmodal_commitment_start <- function() {
+  shiny::modalDialog(
+    title = "Commitment start",
+    easyClose = TRUE,
+    shiny::p("For optimal commitment policy, you must choose when the commitment is assumed to have begun. Current optimal policy may be affected by outcomes since that date.")
+  )
+}
+
