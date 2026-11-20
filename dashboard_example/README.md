@@ -631,6 +631,8 @@ The US baseline is built as in the [Quick start](#quick-start).
 - `app.R` - deploy entrypoint; sources `usa_dashboard.R` and returns the app.
 - `usa_dashboard.R` - dashboard composition (paths, timeline, model list,
   `configure_dashboard()` call, `usa_dashboard()` function).
+- `help_text.R` - the help guides shown by the info buttons, in markdown,
+  and how to add more.
 - `fetch_us_fred.R` - fetches the US data and real-time vintages from FRED
   and saves them to `inputs/us_fred_raw.rds` (R; needs a FRED API key).
 - `build_us_baseline.R` - builds the US baseline, timeline, targets and
