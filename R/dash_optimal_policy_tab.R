@@ -143,6 +143,21 @@ optimal_policy_has_vintages <- function(config) {
   !is.null(config$optimal_policy$loss_variable_vintages)
 }
 
+# The commitment starts the slider offers: each quarter from the configured
+# earliest start to the forecast start, labelled e.g. "2025 Q2", so it
+# moves a quarter at a time and only lands on dates the vintages use.
+optimal_policy_commitment_starts <- function(policy) {
+  dates <- seq(policy$preloss_start, policy$forecast_start, by = "quarter")
+  stats::setNames(dates, sprintf("%s Q%d", format(dates, "%Y"), (as.integer(format(dates, "%m")) + 2L) %/% 3L))
+}
+
+# The commitment start chosen on the slider, as a date.
+optimal_policy_commitment_start <- function(label, policy) {
+  starts <- optimal_policy_commitment_starts(policy)
+  if (is.null(label) || !(label %in% names(starts))) return(policy$preloss_start)
+  starts[[label]]
+}
+
 #' Construct selected policy strategies from module inputs.
 #'
 #' @param input Shiny input values.
@@ -160,17 +175,16 @@ optimal_policy_strategies <- function(input, constraints, config) {
   if (!optimal_policy_has_vintages(config)) {
     modes <- unique(replace(modes, modes == "timeless", "commit"))
   }
-  # Discretion allows a longer loss horizon, but not a shorter one: a
-  # policymaker after the loss horizon would have nothing to minimise.
-  if ("disc" %in% modes && input$loss_horizon < input$instrument_horizon) {
+  # The loss horizon may be longer than the optimisation horizon, but not
+  # shorter: policy after the loss horizon would have nothing to minimise.
+  if (input$loss_horizon < input$instrument_horizon) {
     stop(sprintf(
       paste(
-        "Discretion needs a loss evaluation horizon at least as long as the optimisation horizon",
-        "(currently %d and %d quarters). Under discretion policy is re-set each quarter to minimise",
-        "the loss from that quarter on, so there is nothing to minimise after the loss evaluation",
-        "horizon. Lengthen the loss evaluation horizon or shorten the optimisation horizon."
+        "The optimisation horizon (%d quarters) can't be longer than the loss evaluation",
+        "horizon (%d quarters): policy after the loss evaluation horizon would have nothing",
+        "to minimise. Lengthen the loss evaluation horizon or shorten the optimisation horizon."
       ),
-      as.integer(input$loss_horizon), as.integer(input$instrument_horizon)
+      as.integer(input$instrument_horizon), as.integer(input$loss_horizon)
     ), call. = FALSE)
   }
   lapply(modes, function(mode) {
@@ -275,6 +289,7 @@ UITab_OptimalPolicy <- function(id, config) {
   )
   loss_choices <- optimal_policy_loss_choices(config, config$models[selected_models])
   policy_dates <- seq(policy$forecast_start, policy$forecast_end, by = "quarter")
+  commitment_starts <- optimal_policy_commitment_starts(policy)
   plot_range <- optimal_policy_default_plot_range(config$timeline, policy$forecast_end)
   description <- if (is.function(policy$description_ui)) policy$description_ui() else optimal_policy_generic_description()
 
@@ -317,10 +332,16 @@ UITab_OptimalPolicy <- function(id, config) {
         shiny::tags$label(shiny::tagList("Constraints", help_button(ns("help_constraints"))), class = "control-label"),
         optimal_policy_constraint_table(ns, policy_dates, config),
         # The commitment start is only meaningful for timeless commitment,
-        # which needs vintages.
-        if (optimal_policy_has_vintages(config)) shiny::conditionalPanel(
+        # which needs vintages, and only when there's more than one to pick.
+        if (optimal_policy_has_vintages(config) && length(commitment_starts) > 1) shiny::conditionalPanel(
           condition = sprintf("input['%s'] && input['%s'].indexOf('timeless') !== -1", ns("strategy_modes"), ns("strategy_modes")),
-          shiny::sliderInput(ns("preloss_start"), shiny::tagList("Commitment start", help_button(ns("help_commitment_start"))), min = policy$preloss_start, max = policy$forecast_start, value = policy$preloss_start, timeFormat = "%Y-%m-%d")
+          shinyWidgets::sliderTextInput(
+            ns("preloss_start"),
+            shiny::tagList("Commitment start", help_button(ns("help_commitment_start"))),
+            choices = names(commitment_starts),
+            selected = names(commitment_starts)[[1]],
+            grid = FALSE
+          )
         ),
         shiny::sliderInput(ns("date_range"), "Plot range", min = config$timeline$data_start, max = policy$forecast_end, value = plot_range),
         shinyWidgets::prettySwitch(ns("show_table"), "Show table", FALSE),
@@ -584,7 +605,7 @@ ServerTab_OptimalPolicy <- function(id, config) {
             forecast_start = policy$forecast_start,
             forecast_end = policy$forecast_end,
             loss_variable_vintages = policy$loss_variable_vintages,
-            preloss_start = input$preloss_start,
+            preloss_start = optimal_policy_commitment_start(input$preloss_start, policy),
             irf_cache = cache
           ),
           warning = function(w) {

@@ -87,7 +87,14 @@
 #'
 #' Each vintage must cover every quarter from its own first forecast quarter
 #' to the end of today's loss horizon, and today's forecast is taken from
-#' `baseline`.
+#' `baseline`. Dates may be Dates, date-times (e.g. as read by
+#' `readxl::read_excel()`), `YYYY-MM-DD` strings or `YYYYQq` strings, and any
+#' day within a quarter stands for that quarter. Blank `vintage` or `date`
+#' entries, or two rows for the same vintage and quarter, are errors.
+#' Vintages outside `preloss_start` to the quarter before `forecast_start`,
+#' and quarters after the loss horizon, are ignored. When `preloss_start` is
+#' `forecast_start` (the default), there are no past vintages, so
+#' `loss_variable_vintages` isn't needed.
 #'
 #' @section Constraints:
 #' An optional `constraints` entry in `policy_strategy` is a list of
@@ -120,8 +127,10 @@
 #' @param forecast_end Final forecast quarter.
 #' @param loss_variable_vintages Historical forecasts for timeless commitment,
 #'   as described in "Commitment start and forecast vintages". Only used when
-#'   `commit = "timeless"`.
-#' @param preloss_start First historical commitment quarter for timeless policy.
+#'   `commit = "timeless"` and `preloss_start` is before `forecast_start`.
+#' @param preloss_start First historical commitment quarter for timeless
+#'   policy, on or before `forecast_start`; any day in the quarter will do.
+#'   `NULL` (default) means `forecast_start`, i.e. no commitment history.
 #' @param policy_irfs Optional cached array returned by [build_policy_irfs()].
 #'
 #' @return A long data frame containing baseline and alternative paths.
@@ -237,10 +246,8 @@ get_policy_scenario <- function(
   Y0 <- t(as.matrix(baseline_forecast))
   T_preloss <- 0L
   if (commit == "timeless") {
-    if (is.null(preloss_start)) {
-      stop("Timeless commitment requires `preloss_start`.", call. = FALSE)
-    }
-    T_preloss <- length(seq(as.Date(preloss_start), as.Date(forecast_start), by = "quarter")) - 1L
+    preloss_start <- ezdyn_policy_preloss_start(preloss_start, forecast_start)
+    T_preloss <- length(seq(preloss_start, as.Date(forecast_start), by = "quarter")) - 1L
   }
   T_irf <- max(T, T_loss + T_preloss)
   T_instrument_irf <- max(T_instrument, T_instrument + T_preloss)
@@ -278,8 +285,9 @@ get_policy_scenario <- function(
     )
   } else {
     # Vintage columns are located the same way as baseline columns, then
-    # renamed to the resolved identifiers used below.
-    loss_variable_vintages <- ezdyn_policy_vintages(
+    # renamed to the resolved identifiers used below. Commitment starting at
+    # the forecast start has no past vintages, so they aren't needed.
+    loss_variable_vintages <- if (T_preloss > 0L) ezdyn_policy_vintages(
       loss_variable_vintages, loss_variables, instrument_variable,
       any(vapply(constraints, function(x) isTRUE(x$historical), logical(1))),
       originals_for, model$M_
@@ -353,7 +361,7 @@ get_policy_scenario <- function(
     dplyr::arrange(date)
 }
 
-#' Run optimal-policy scenarios for one or more models.
+#' Run optimal-policy scenarios for one or more models
 #'
 #' Loops [get_policy_scenario()] over every model in `models` and every
 #' strategy in `strategies`, so a dashboard or script only needs to supply a
@@ -367,6 +375,9 @@ get_policy_scenario <- function(
 #' no pre-forecast history, labelled `"Optimal (<model>)"`. A model with some
 #' anticipated shocks, but too few for a strategy's optimisation horizon (plus
 #' any timeless-commitment history), skips that strategy with a warning.
+#' Likewise, a strategy that fails for a model (e.g. timeless commitment with
+#' incomplete vintages) is omitted with a warning giving the reason, and the
+#' rest still run; only if every one fails is that an error.
 #'
 #' @param strategies List of `policy_strategy` specifications (see
 #'   [get_policy_scenario()]). Each is run against every model in `models`;
@@ -385,7 +396,8 @@ get_policy_scenario <- function(
 #' @param forecast_end Final forecast quarter.
 #' @param loss_variable_vintages Past baselines for timeless commitment; see
 #'   [get_policy_scenario()] for the format.
-#' @param preloss_start First historical commitment quarter for timeless policy.
+#' @param preloss_start First historical commitment quarter for timeless
+#'   policy; `NULL` (default) means `forecast_start`.
 #' @param irf_cache Optional environment used to cache each model/strategy's
 #'   [build_policy_irfs()] result across repeated calls (e.g. across Shiny
 #'   reactive invalidations that change only loss weights/targets, not
@@ -411,6 +423,11 @@ get_policy_scenarios <- function(
     stop("`strategies` must be a non-empty list of policy strategies.", call. = FALSE)
   }
 
+  # A failing (model, strategy) pair is omitted, so the others still run. Its
+  # message becomes a warning if anything else succeeds, or the error if
+  # nothing does.
+  failures <- character()
+  succeeded <- FALSE
   compute <- function(model, model_name) {
     # Unanticipated policy shocks (no anticipated shocks, or no anticipation)
     # make timeless commitment and discretion meaningless, so each strategy
@@ -420,19 +437,41 @@ get_policy_scenarios <- function(
       if (strategy$unanticipated) strategy$commit <- "commit"
       strategy
     }))
-    # A plain lapply()/bind_rows() (not purrr::map_dfr()) so a genuine failure
-    # for one strategy propagates its real, unwrapped message up to
-    # ezdyn_combine_models_dfr()'s per-model error attribution, rather than
-    # being replaced by purrr's own opaque "In index: n" wrapping.
     dplyr::bind_rows(lapply(model_strategies, function(strategy) {
-      ezdyn_policy_scenario_for_model(
-        strategy, model, model_name, baseline, use_cd, lambda,
-        forecast_start, forecast_end, loss_variable_vintages, preloss_start, irf_cache
+      result <- tryCatch(
+        ezdyn_policy_scenario_for_model(
+          strategy, model, model_name, baseline, use_cd, lambda,
+          forecast_start, forecast_end, loss_variable_vintages, preloss_start, irf_cache
+        ),
+        error = function(condition) {
+          failures <<- c(failures, sprintf(
+            "Omitted `%s` for model `%s`: %s",
+            ezdyn_policy_output_name(strategy, model_name), model_name, conditionMessage(condition)
+          ))
+          NULL
+        }
       )
+      if (!is.null(result) && nrow(result) > 0) succeeded <<- TRUE
+      result
     }))
   }
 
-  ezdyn_combine_models_dfr(models, compute, context = "get_policy_scenarios()")
+  out <- ezdyn_combine_models_dfr(models, compute, context = "get_policy_scenarios()")
+  if (length(failures) > 0) {
+    if (!succeeded) stop(paste(failures, collapse = "\n"), call. = FALSE)
+    for (failure in failures) warning(failure, call. = FALSE)
+  }
+  out
+}
+
+# Label a strategy from the model's list name and commitment mode (just the
+# model's name if its shocks are unanticipated).
+ezdyn_policy_output_name <- function(strategy, model_name) {
+  if (isTRUE(strategy$unanticipated)) {
+    sprintf("Optimal (%s)", model_name)
+  } else {
+    sprintf("Optimal (%s, %s)", model_name, ezdyn_policy_mode_label(strategy$commit))
+  }
 }
 
 # Count the anticipated versions (`<shock>_1`, `<shock>_2`, ...) of a
@@ -457,11 +496,7 @@ ezdyn_policy_scenario_for_model <- function(strategy, model, model_name, baselin
                                             preloss_start, irf_cache) {
   unanticipated <- isTRUE(strategy$unanticipated)
   if (unanticipated) use_cd <- FALSE
-  strategy$output_name <- if (unanticipated) {
-    sprintf("Optimal (%s)", model_name)
-  } else {
-    sprintf("Optimal (%s, %s)", model_name, ezdyn_policy_mode_label(strategy$commit))
-  }
+  strategy$output_name <- ezdyn_policy_output_name(strategy, model_name)
 
   instrument_variable <- strategy$instrument_variable
   if (is.null(instrument_variable)) instrument_variable <- "r_obs"
@@ -475,8 +510,9 @@ ezdyn_policy_scenario_for_model <- function(strategy, model, model_name, baselin
     constraint_variables,
     instrument_variable
   ))
-  preloss <- if (identical(strategy$commit, "timeless") && !is.null(preloss_start)) {
-    length(seq(as.Date(preloss_start), as.Date(forecast_start), by = "quarter")) - 1L
+  preloss <- if (identical(strategy$commit, "timeless")) {
+    preloss_start <- ezdyn_policy_preloss_start(preloss_start, forecast_start)
+    length(seq(preloss_start, as.Date(forecast_start), by = "quarter")) - 1L
   } else {
     0L
   }
@@ -920,15 +956,12 @@ ezdyn_policy_vintages <- function(vintages, loss_variables, instrument_variable,
     }, character(1), USE.NAMES = FALSE)
   }
   if (is.null(vintages)) {
-    stop(sprintf(
+    ezdyn_vintage_stop(sprintf(
       "Timeless commitment needs loss-variable vintages (`loss_variable_vintages`): a data frame with `vintage` and `date` columns and the column(s) %s.",
       paste0("`", expected(loss_variables), "`", collapse = ", ")
-    ), call. = FALSE)
+    ))
   }
-  missing_keys <- setdiff(c("vintage", "date"), names(vintages))
-  if (length(missing_keys) > 0) {
-    stop(sprintf("Loss-variable vintages are missing the %s column(s).", paste0("`", missing_keys, "`", collapse = ", ")), call. = FALSE)
-  }
+  vintages <- ezdyn_check_vintage_keys(vintages)
   needed <- loss_variables
   if (historical) needed <- unique(c(needed, instrument_variable))
   columns <- ezdyn_policy_columns(names(vintages), needed, originals_for, M_)
@@ -945,51 +978,208 @@ ezdyn_policy_vintages <- function(vintages, loss_variables, instrument_variable,
         expected(instrument_variable)
       )
     )
-    stop(sprintf(
+    ezdyn_vintage_stop(sprintf(
       "Loss-variable vintages are missing column(s) needed for timeless commitment: %s.",
       paste(problems, collapse = "; and ")
-    ), call. = FALSE)
+    ))
   }
-  vintages <- ezdyn_policy_rename_columns(as.data.frame(vintages), columns)
-  vintages$vintage <- as.Date(vintages$vintage)
-  vintages$date <- as.Date(vintages$date)
+  not_numeric <- columns[!vapply(vintages[columns], is.numeric, logical(1))]
+  if (length(not_numeric) > 0) {
+    ezdyn_vintage_stop(sprintf(
+      "Loss-variable vintage column(s) %s must be numeric.",
+      paste0("`", not_numeric, "`", collapse = ", ")
+    ))
+  }
+  vintages <- ezdyn_policy_rename_columns(vintages, columns)
   # Keep the supplied column names for error messages.
   attr(vintages, "ezdyn_columns") <- columns
   vintages
 }
 
-ezdyn_policy_history <- function(vintages, variables, preloss_start, forecast_start, horizon, current) {
-  if (is.null(vintages)) stop("Timeless commitment requires loss-variable vintages.", call. = FALSE)
-  required <- c("date", "vintage", variables)
-  if (!all(required %in% names(vintages))) {
+# Raise a vintage problem with its own condition class, so callers can tell
+# it apart from other failures.
+ezdyn_vintage_stop <- function(message) {
+  stop(structure(
+    class = c("ezdyn_policy_vintage_error", "error", "condition"),
+    list(message = message, call = NULL)
+  ))
+}
+
+# List up to `max` items, then say how many more there are.
+ezdyn_format_some <- function(items, max = 10L, sep = ", ") {
+  shown <- paste(utils::head(items, max), collapse = sep)
+  if (length(items) > max) shown <- sprintf("%s%sand %d more", shown, sep, length(items) - max)
+  shown
+}
+
+# Convert dates to the package's quarter convention: the first day of the
+# quarter's last month, so any day in April to June becomes 1 June. Accepts
+# Dates, POSIXct (by its own wall-clock date, so the time zone cannot shift
+# the day), `YYYY-MM-DD` strings and `YYYYQq` strings. Missing or blank
+# values stay NA.
+ezdyn_as_quarter_dates <- function(values, what) {
+  if (inherits(values, "Date")) {
+    dates <- values
+  } else if (inherits(values, "POSIXt")) {
+    dates <- as.Date(format(values, "%Y-%m-%d"))
+  } else if (is.character(values) || is.factor(values)) {
+    strings <- trimws(as.character(values))
+    strings[!is.na(strings) & strings == ""] <- NA_character_
+    dates <- rep(as.Date(NA), length(strings))
+    iso <- !is.na(strings) & grepl("^\\d{4}-\\d{2}-\\d{2}$", strings)
+    dates[iso] <- as.Date(strings[iso], format = "%Y-%m-%d")
+    quarter <- !is.na(strings) & grepl("^\\d{4}[Qq][1-4]$", strings)
+    dates[quarter] <- as.Date(sprintf(
+      "%s-%02d-01", substr(strings[quarter], 1, 4), 3L * as.integer(substr(strings[quarter], 6, 6))
+    ))
+    bad <- which(!is.na(strings) & is.na(dates))
+    if (length(bad) > 0) {
+      ezdyn_vintage_stop(sprintf(
+        "%s has dates that can't be read, e.g. \"%s\" in row %d. Use dates, `YYYY-MM-DD` strings or `YYYYQq` strings.",
+        what, strings[[bad[[1]]]], bad[[1]]
+      ))
+    }
+  } else if (all(is.na(values))) {
+    dates <- rep(as.Date(NA), length(values))
+  } else {
+    ezdyn_vintage_stop(sprintf(
+      "%s must hold dates, `YYYY-MM-DD` strings or `YYYYQq` strings, not %s values%s.",
+      what, class(values)[[1]],
+      if (is.numeric(values)) " (e.g. Excel date serial numbers: format the cells as dates)" else ""
+    ))
+  }
+  out <- rep(as.Date(NA), length(dates))
+  known <- !is.na(dates)
+  out[known] <- start_of_month(end_of_quarter(dates[known]))
+  out
+}
+
+# Check the `vintage` and `date` keys of loss-variable vintages: present,
+# readable as dates (snapped to the quarter grid), never blank, and unique.
+# Returns a data frame with clean Date keys.
+ezdyn_check_vintage_keys <- function(vintages) {
+  if (!is.data.frame(vintages)) {
+    ezdyn_vintage_stop("Loss-variable vintages must be a data frame with `vintage` and `date` columns.")
+  }
+  missing_keys <- setdiff(c("vintage", "date"), names(vintages))
+  if (length(missing_keys) > 0) {
+    ezdyn_vintage_stop(sprintf(
+      "Loss-variable vintages are missing the %s column(s).",
+      paste0("`", missing_keys, "`", collapse = ", ")
+    ))
+  }
+  vintages <- as.data.frame(vintages, check.names = FALSE)
+  for (key in c("vintage", "date")) {
+    vintages[[key]] <- ezdyn_as_quarter_dates(vintages[[key]], sprintf("The vintages' `%s` column", key))
+    blank <- which(is.na(vintages[[key]]))
+    if (length(blank) > 0) {
+      ezdyn_vintage_stop(sprintf(
+        "The vintages' `%s` column is blank in row(s) %s.", key, ezdyn_format_some(blank)
+      ))
+    }
+  }
+  keys <- paste(format(vintages$vintage), format(vintages$date))
+  repeated <- unique(keys[duplicated(keys)])
+  if (length(repeated) > 0) {
+    pairs <- vapply(repeated, function(key) {
+      rows <- which(keys == key)
+      sprintf("vintage %s, date %s (rows %s)", format(vintages$vintage[[rows[[1]]]]), format(vintages$date[[rows[[1]]]]), paste(rows, collapse = ", "))
+    }, character(1))
+    ezdyn_vintage_stop(sprintf(
+      "Loss-variable vintages have more than one row for %s. Each vintage needs one row per quarter (dates in the same quarter count as the same quarter).",
+      ezdyn_format_some(pairs, max = 5L, sep = "; ")
+    ))
+  }
+  vintages
+}
+
+# Shorten runs of consecutive quarters, e.g. "2026-03-01 to 2026-09-01".
+ezdyn_format_quarter_runs <- function(dates) {
+  dates <- sort(unique(dates))
+  index <- as.integer(format(dates, "%Y")) * 4L + (as.integer(format(dates, "%m")) - 1L) %/% 3L
+  run <- cumsum(c(TRUE, diff(index) != 1L))
+  runs <- vapply(split(dates, run), function(d) {
+    if (length(d) == 1) format(d[[1]]) else paste(format(d[[1]]), "to", format(d[[length(d)]]))
+  }, character(1))
+  paste(runs, collapse = ", ")
+}
+
+# The commitment start for timeless commitment: `forecast_start` if NULL,
+# otherwise snapped to the quarter grid, and never after `forecast_start`.
+ezdyn_policy_preloss_start <- function(preloss_start, forecast_start) {
+  forecast_start <- as.Date(forecast_start)
+  if (is.null(preloss_start)) return(forecast_start)
+  if (length(preloss_start) != 1) stop("`preloss_start` must be one date.", call. = FALSE)
+  preloss_start <- ezdyn_as_quarter_dates(preloss_start, "`preloss_start`")
+  if (is.na(preloss_start)) stop("`preloss_start` must be one date.", call. = FALSE)
+  if (preloss_start > forecast_start) {
     stop(sprintf(
-      "Loss-variable vintages are missing column(s): %s.",
-      paste0("`", setdiff(required, names(vintages)), "`", collapse = ", ")
+      "`preloss_start` (%s) is after `forecast_start` (%s): commitment has to start on or before the forecast start.",
+      format(preloss_start), format(forecast_start)
     ), call. = FALSE)
   }
+  preloss_start
+}
+
+# The forecasts made at each past vintage from `preloss_start` to the
+# quarter before `forecast_start`, then the current baseline (`current`):
+# an array of variables x dates x vintages. Vintages are only read when
+# `preloss_start` is before `forecast_start`; every gap is reported at once.
+ezdyn_policy_history <- function(vintages, variables, preloss_start, forecast_start, horizon, current) {
   vintage_dates <- seq(as.Date(preloss_start), as.Date(forecast_start), by = "quarter")
   dates <- seq(as.Date(preloss_start), by = "quarter", length.out = length(vintage_dates) - 1 + horizon)
   out <- array(NA_real_, c(length(variables), length(dates), length(vintage_dates)), list(variables, as.character(dates), as.character(vintage_dates)))
-  for (i in seq_len(length(vintage_dates) - 1)) {
-    slice <- vintages[
-      as.Date(vintages$vintage) == vintage_dates[[i]] & as.Date(vintages$date) %in% dates,
-      c("date", variables),
-      drop = FALSE
-    ]
-    positions <- match(as.Date(slice$date), dates)
-    out[, positions, i] <- t(as.matrix(slice[, variables, drop = FALSE]))
-    incomplete <- is.na(out[, i:length(dates), i, drop = FALSE])
-    if (any(incomplete)) {
-      labels <- attr(vintages, "ezdyn_columns")
-      missing <- variables[apply(incomplete, 1, any)]
-      if (!is.null(labels)) missing <- unname(labels[missing])
-      stop(sprintf(
-        "Loss-variable vintage %s is incomplete: %s must cover every quarter from %s to %s.",
-        format(vintage_dates[[i]]),
-        paste0("`", missing, "`", collapse = ", "),
-        format(vintage_dates[[i]]),
+  past <- seq_len(length(vintage_dates) - 1)
+  if (length(past) > 0) {
+    if (is.null(vintages)) ezdyn_vintage_stop("Timeless commitment requires loss-variable vintages.")
+    required <- c("date", "vintage", variables)
+    if (!all(required %in% names(vintages))) {
+      ezdyn_vintage_stop(sprintf(
+        "Loss-variable vintages are missing column(s): %s.",
+        paste0("`", setdiff(required, names(vintages)), "`", collapse = ", ")
+      ))
+    }
+    labels <- attr(vintages, "ezdyn_columns")
+    label <- function(variable) {
+      if (!is.null(labels) && variable %in% names(labels) && !is.na(labels[[variable]])) labels[[variable]] else variable
+    }
+    problems <- character()
+    for (i in past) {
+      vintage <- format(vintage_dates[[i]])
+      wanted <- dates[i:length(dates)]
+      slice <- vintages[
+        as.Date(vintages$vintage) == vintage_dates[[i]] & as.Date(vintages$date) %in% dates,
+        c("date", variables),
+        drop = FALSE
+      ]
+      if (nrow(slice) == 0) {
+        problems <- c(problems, sprintf("vintage %s has no rows", vintage))
+        next
+      }
+      positions <- match(as.Date(slice$date), dates)
+      out[, positions, i] <- t(as.matrix(slice[, variables, drop = FALSE]))
+      found <- wanted %in% as.Date(slice$date)
+      if (any(!found)) {
+        problems <- c(problems, sprintf("vintage %s has no row for %s", vintage, ezdyn_format_quarter_runs(wanted[!found])))
+      }
+      present <- wanted[found]
+      for (variable in variables) {
+        blank <- present[is.na(out[variable, as.character(present), i])]
+        if (length(blank) > 0) {
+          problems <- c(problems, sprintf(
+            "`%s` in vintage %s is blank for %s", label(variable), vintage, ezdyn_format_quarter_runs(blank)
+          ))
+        }
+      }
+    }
+    if (length(problems) > 0) {
+      ezdyn_vintage_stop(sprintf(
+        "Loss-variable vintages are incomplete: %s. Each vintage from %s to %s needs a row, with values in %s, for every quarter from its own quarter to %s.",
+        ezdyn_format_some(problems, max = 8L, sep = "; "),
+        format(vintage_dates[[1]]), format(vintage_dates[[length(past)]]),
+        paste0("`", vapply(variables, label, character(1)), "`", collapse = ", "),
         format(dates[[length(dates)]])
-      ), call. = FALSE)
+      ))
     }
   }
   start <- length(vintage_dates)

@@ -398,3 +398,51 @@ testthat::test_that("configure_dashboard labels unnamed loss and constraint choi
     "needs `vintage` and `date` columns"
   )
 })
+
+testthat::test_that("configure_dashboard checks loss-variable vintages up front", {
+  arguments <- list(
+    models = list(DINGO = dashboard_test_model()),
+    timeline = dashboard_test_timeline(),
+    baselines = list(Staff = dashboard_test_baseline()),
+    default_baseline = "Staff"
+  )
+  vintages <- data.frame(
+    vintage = as.Date("2023-12-01"),
+    date = seq(as.Date("2023-12-01"), by = "quarter", length.out = 5),
+    Inflation_gap_loss = 0.1,
+    `Cash Rate` = 4,
+    check.names = FALSE
+  )
+  configure <- function(vintages) {
+    policy_config <- list(
+      forecast_end = as.Date("2024-12-01"),
+      preloss_start = as.Date("2023-12-01"),
+      loss_variable_choices = "Inflation",
+      constraint_variable_choices = "Cash Rate",
+      loss_variable_vintages = vintages
+    )
+    do.call(configure_dashboard, c(arguments, list(optimal_policy = policy_config)))
+  }
+
+  # Date-times, as readxl returns, are stored as quarter dates.
+  posix <- vintages
+  posix$vintage <- as.POSIXct("2023-12-01", tz = "UTC")
+  posix$date <- as.POSIXct(format(vintages$date), tz = "UTC")
+  config <- testthat::expect_no_warning(configure(posix))
+  testthat::expect_identical(config$optimal_policy$loss_variable_vintages$date, vintages$date)
+
+  # Unreadable, blank or duplicate dates stop the dashboard.
+  testthat::expect_error(
+    configure(rbind(vintages, vintages[2, ])),
+    "`optimal_policy$loss_variable_vintages`: Loss-variable vintages have more than one row for vintage 2023-12-01, date 2024-03-01 (rows 2, 6)",
+    fixed = TRUE
+  )
+  blank <- vintages
+  blank$vintage[3] <- NA
+  testthat::expect_error(configure(blank), "`vintage` column is blank in row(s) 3", fixed = TRUE)
+
+  # Gaps only warn: a later commitment start or other choices may avoid them.
+  testthat::expect_warning(configure(vintages[1:3, ]), "vintage 2023-12-01 has no row for 2024-09-01 to 2024-12-01", fixed = TRUE)
+  testthat::expect_warning(configure(vintages[c("vintage", "date", "Cash Rate")]), "there's no `Inflation_gap_loss` column", fixed = TRUE)
+  testthat::expect_warning(configure(vintages[c("vintage", "date", "Inflation_gap_loss")]), "no policy-rate level column (`r_obs`", fixed = TRUE)
+})

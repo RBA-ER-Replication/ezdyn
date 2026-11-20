@@ -44,9 +44,11 @@ dynare code or its display name.}
 
 \item{loss_variable_vintages}{Historical forecasts for timeless commitment,
 as described in "Commitment start and forecast vintages". Only used when
-\code{commit = "timeless"}.}
+\code{commit = "timeless"} and \code{preloss_start} is before \code{forecast_start}.}
 
-\item{preloss_start}{First historical commitment quarter for timeless policy.}
+\item{preloss_start}{First historical commitment quarter for timeless
+policy, on or before \code{forecast_start}; any day in the quarter will do.
+\code{NULL} (default) means \code{forecast_start}, i.e. no commitment history.}
 
 \item{policy_irfs}{Optional cached array returned by \code{\link[=build_policy_irfs]{build_policy_irfs()}}.}
 }
@@ -144,7 +146,14 @@ policy instrument's level, named like \code{instrument_variable} (e.g.
 
 Each vintage must cover every quarter from its own first forecast quarter
 to the end of today's loss horizon, and today's forecast is taken from
-\code{baseline}.
+\code{baseline}. Dates may be Dates, date-times (e.g. as read by
+\code{readxl::read_excel()}), \code{YYYY-MM-DD} strings or \code{YYYYQq} strings, and any
+day within a quarter stands for that quarter. Blank \code{vintage} or \code{date}
+entries, or two rows for the same vintage and quarter, are errors.
+Vintages outside \code{preloss_start} to the quarter before \code{forecast_start},
+and quarters after the loss horizon, are ignored. When \code{preloss_start} is
+\code{forecast_start} (the default), there are no past vintages, so
+\code{loss_variable_vintages} isn't needed.
 }
 
 \section{Constraints}{

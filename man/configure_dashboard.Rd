@@ -378,8 +378,17 @@ must already be gaps, from the target as it stood at the time. The
 \code{instrument_variable}: under timeless commitment the ELB is assumed to
 have applied in every past vintage too, which can call for "make-up"
 policy today. See \code{\link[=get_policy_scenario]{get_policy_scenario()}} for the full format.
+\code{configure_dashboard()} stops if the \code{vintage} or \code{date} columns can't
+be read as dates, are blank, or repeat a vintage and quarter. It warns,
+but still launches, if a loss-variable choice has no gap column, the
+vintages don't cover every quarter needed from \code{preloss_start} at the
+default loss horizon, or the policy rate's level is missing. If one
+strategy fails when a graph is generated, the others are still shown,
+with a note explaining what went wrong.
 \item \code{preloss_start}: the earliest commitment start the user can choose,
-usually the first vintage (default \code{timeline$forecast_start}).
+usually the first vintage (default \code{timeline$forecast_start}). The
+"Commitment start" slider moves a quarter at a time from here to the
+forecast start.
 }
 
 Advanced, rarely needed:
