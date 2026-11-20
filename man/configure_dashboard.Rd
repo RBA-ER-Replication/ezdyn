@@ -89,10 +89,11 @@ of the baseline, in the policy rate's units.}
 \item{cr_button_step}{Step of the sliders' plus/minus buttons.}
 
 \item{baseline_upload_source_models}{Models users can choose to translate
-an uploaded baseline written in model codes (default: all).}
+an uploaded baseline written in model codes (the upload dialog's "Model
+input" option; default: all).}
 
 \item{default_baseline_upload_source_model}{The model initially chosen for
-that (default: the first).}
+that (default: the first). Uploads in display names don't use it.}
 
 \item{allow_display_name_upload}{Whether users can upload a baseline
 already in display names and units (default \code{TRUE}).}
@@ -174,9 +175,11 @@ your models' historical shock decompositions start at a different
 quarter from \code{data_start}.
 \item \strong{\code{baselines}}: a named list of one or more baseline forecasts, each
 built with \code{\link[=import_baseline]{import_baseline()}}, so its columns are display names in the
-dashboard's units. Each must cover every quarter from \code{data_start} to
-\code{forecast_end}. Users choose between them, and can upload more, in the
-app.
+dashboard's units. Build one from data in display names - which can then
+hold any of the models' variables - or in one model's own variable codes.
+Each must cover every quarter from \code{data_start} to \code{forecast_end}. Users
+choose between them, and can upload more, in the app. Only variables in
+the baseline can be plotted as alternative or optimal policy paths.
 \item \strong{\code{default_baseline}}: the name of the baseline selected when the
 dashboard opens.
 }
@@ -429,8 +432,9 @@ Policy Paths sliders' range either side of the baseline, step, and the
 step of their plus/minus buttons, in the policy rate's units.
 \item \code{baseline_upload_source_models}, \code{default_baseline_upload_source_model},
 \code{allow_display_name_upload}: which models users can choose to translate
-an uploaded baseline written in model codes, and whether they can upload
-one already in display names.
+an uploaded baseline written in model codes (the "Model input" option),
+and whether they can upload one already in display names (the "Default
+template" option, which can hold any of the models' variables).
 \item \code{help}: \code{help$anticipated_shocks}, a function returning a
 \code{\link[shiny:modalDialog]{shiny::modalDialog()}} for Alternative Policy Paths' help buttons.
 \item \code{plotters}: the plotting styles offered, from \code{"ggplot"} (the default)

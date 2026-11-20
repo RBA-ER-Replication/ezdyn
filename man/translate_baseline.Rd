@@ -2,21 +2,28 @@
 % Please edit documentation in R/baseline_import.R
 \name{translate_baseline}
 \alias{translate_baseline}
-\title{Translate a normalized baseline to canonical display-name columns.}
+\title{Translate a normalized baseline to canonical display-name columns}
 \usage{
-translate_baseline(baseline, source_model)
+translate_baseline(baseline, source_model = NULL, models = list())
 }
 \arguments{
 \item{baseline}{A data frame with normalized `date` column.}
 
-\item{source_model}{Full source MOO pair used to interpret input columns.}
+\item{source_model}{Optional full MOO pair whose Dynare names the input may
+use, or `NULL` for a baseline in display names only.}
+
+\item{models}{Named list of full MOO pairs whose display names the input
+may use.}
 }
 \value{
 A tibble with `date` and unique display-name columns.
 }
 \description{
-Matches exact source-model display names before exact Dynare names. Display-name
-columns are already in general units and are not rescaled; Dynare-name columns
-are rescaled once with the source model metadata.
+Each input column is either a display name of one of the models, kept as
+it is (it's already in display units), or - only when `source_model` is
+given - one of `source_model`'s Dynare names, rescaled once with its
+metadata and renamed to its display name. `source_model`'s own display and
+Dynare names take precedence over the other models' display names. Other
+columns are dropped with a warning.
 }
 \keyword{internal}

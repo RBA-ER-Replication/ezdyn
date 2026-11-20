@@ -667,9 +667,11 @@ dashboard_validate_plotters <- function(plotters) {
 #'
 #' * **`baselines`**: a named list of one or more baseline forecasts, each
 #'   built with [import_baseline()], so its columns are display names in the
-#'   dashboard's units. Each must cover every quarter from `data_start` to
-#'   `forecast_end`. Users choose between them, and can upload more, in the
-#'   app.
+#'   dashboard's units. Build one from data in display names - which can then
+#'   hold any of the models' variables - or in one model's own variable codes.
+#'   Each must cover every quarter from `data_start` to `forecast_end`. Users
+#'   choose between them, and can upload more, in the app. Only variables in
+#'   the baseline can be plotted as alternative or optimal policy paths.
 #'
 #' * **`default_baseline`**: the name of the baseline selected when the
 #'   dashboard opens.
@@ -902,8 +904,9 @@ dashboard_validate_plotters <- function(plotters) {
 #'   step of their plus/minus buttons, in the policy rate's units.
 #' * `baseline_upload_source_models`, `default_baseline_upload_source_model`,
 #'   `allow_display_name_upload`: which models users can choose to translate
-#'   an uploaded baseline written in model codes, and whether they can upload
-#'   one already in display names.
+#'   an uploaded baseline written in model codes (the "Model input" option),
+#'   and whether they can upload one already in display names (the "Default
+#'   template" option, which can hold any of the models' variables).
 #' * `help`: `help$anticipated_shocks`, a function returning a
 #'   [shiny::modalDialog()] for Alternative Policy Paths' help buttons.
 #' * `plotters`: the plotting styles offered, from `"ggplot"` (the default)
@@ -951,9 +954,10 @@ dashboard_validate_plotters <- function(plotters) {
 #' @param r_slider_step Alternative Policy Paths sliders' step.
 #' @param cr_button_step Step of the sliders' plus/minus buttons.
 #' @param baseline_upload_source_models Models users can choose to translate
-#'   an uploaded baseline written in model codes (default: all).
+#'   an uploaded baseline written in model codes (the upload dialog's "Model
+#'   input" option; default: all).
 #' @param default_baseline_upload_source_model The model initially chosen for
-#'   that (default: the first).
+#'   that (default: the first). Uploads in display names don't use it.
 #' @param allow_display_name_upload Whether users can upload a baseline
 #'   already in display names and units (default `TRUE`).
 #' @param dictionary Variable Dictionary settings: a list with `models` and

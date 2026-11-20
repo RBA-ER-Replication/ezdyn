@@ -18,6 +18,11 @@ Then, you can use ezdyn to either:
 Simply provide a list of models and a spreadsheet containing forecast (and the dates).
 
 ```r
+# A baseline whose columns are display names (e.g. "Inflation"), in display
+# units, holding any of the models' variables
+baseline <- import_baseline("baseline.xlsx", models = models)
+
+# Or one written in a single model's own variable codes and units
 baseline <- import_baseline("baseline.xlsx", source_model = model, models = models)
 
 config <- configure_dashboard(

@@ -123,37 +123,6 @@ usa_startup_modal <- shiny::modalDialog(
 )
 
 
-# Each model variable's own steady-state level (in display units), named by
-# display name. Derived metadata rows (e.g. "Nominal Interest Rate
-# (quarterly)") are left out: `import_baseline()` computes them from their
-# source column.
-dsgemoddash_steady_state_values <- function(model) {
-  steady_state <- as.numeric(model$oo_$dr$ys)
-  names(steady_state) <- model$M_$endo.names
-
-  varmeta <- model$M_$varmeta
-  varmeta <- varmeta[varmeta$dynare_name %in% model$M_$endo.names, ]
-  # `scale_factor` is a list column (one value per row, see calc_scale_factors()
-  # in rescale_irf.R) - unlist() it to a plain numeric vector before use.
-  values <- steady_state[varmeta$dynare_name] * unlist(varmeta$scale_factor)
-  names(values) <- varmeta$display_name
-  values
-}
-
-# Build the dashboard baseline: each metadata variable's own steady-state
-# level, flat over every supplied quarter, with the FRED/SEP baseline
-# (build_us_baseline.R, already in display names and units) overwritten in
-# for SW's seven observables. The model-consistent (non-observable)
-# variables, including "Output", have no data counterpart, so they stay at
-# steady state.
-sw_build_baseline <- function(model, dates) {
-  values <- dsgemoddash_steady_state_values(model)
-  baseline <- tibble(date = dates, !!!as.list(values))
-  us_data <- openxlsx2::read_xlsx(us_baseline_path, sheet = "baseline") |>
-    select(-any_of("Unemployment Rate"))
-  dplyr::rows_update(baseline, us_data, by = "date")
-}
-
 # Read the real-time vintages (build_us_baseline.R's inputs/us_vintages.xlsx)
 # for Optimal Policy's timeless commitment, or return `NULL`, so the dashboard
 # runs with ordinary commitment, if there's no vintages workbook or it's out
@@ -177,44 +146,6 @@ us_read_vintages <- function(path, forecast_start) {
     return(NULL)
   }
   vintages
-}
-
-# Overwrite the combined baseline's "Unemployment Rate" (Gali Unemployment
-# (2010)'s, otherwise at steady state) with the US unemployment rate from the
-# FRED/SEP baseline, in per cent. The Optimal Policy tab measures its gap from
-# the tab's unemployment target.
-us_add_unemployment <- function(baseline) {
-  us_data <- openxlsx2::read_xlsx(us_baseline_path, sheet = "baseline")
-  if (!("Unemployment Rate" %in% names(baseline)) || !("Unemployment Rate" %in% names(us_data))) {
-    stop("The baseline and inputs/us_baseline.xlsx must both have \"Unemployment Rate\"; re-run build_us_baseline.R.", call. = FALSE)
-  }
-  rate <- us_data$`Unemployment Rate`[match(baseline$date, as.Date(us_data$date))]
-  if (anyNA(rate)) stop("inputs/us_baseline.xlsx doesn't cover every baseline quarter's unemployment rate.", call. = FALSE)
-  baseline[["Unemployment Rate"]] <- rate
-  baseline
-}
-
-# Read each of the 7 additional metadata variables' own steady-state level
-# off its model's Dynare solution and repeat it flat over every supplied
-# quarter - a synthetic baseline with no invented economic scenario, since
-# these textbook models have no real-world data counterpart (mirrors SW's own
-# steady-state expansion above, minus the historical overlay).
-dsgemoddash_build_synthetic_baseline <- function(model, dates) {
-  tibble(date = dates, !!!as.list(dsgemoddash_steady_state_values(model)))
-}
-
-# Left-join `extra` onto `base` by date, keeping only display-name columns
-# not already present in `base`. Several of the 7 additional models share
-# display names with SW (e.g. "Nominal Interest Rate", "Inflation", "Hours
-# Worked") - SW's real historical values should win for those, so each new
-# model's own (always-zero-or-steady-state) column is dropped in favour of
-# whatever the combined baseline already has.
-dsgemoddash_merge_new_columns <- function(base, extra) {
-  new_cols <- setdiff(names(extra), names(base))
-  if (length(new_cols) == 0) {
-    return(base)
-  }
-  dplyr::left_join(base, extra[, c("date", new_cols)], by = "date")
 }
 
 # Build and return the combined dashboard `shiny.appobj`.
@@ -247,8 +178,8 @@ usa_dashboard <- function() {
   })
   names(semi_structural) <- semi_structural_models$model_name
 
-  # The semi-structural models' variables all appear in the SW and Gali
-  # baselines below, so they need no baseline of their own.
+  # SW comes first: derived baseline variables (e.g. year-ended output growth)
+  # come from the first model that can derive them.
   models <- c(list(`Smets Wouters (2007)` = sw_model), extra_models, semi_structural)
 
   # Data/forecast dates determined by build_us_baseline.R, with the forecast
@@ -269,21 +200,13 @@ usa_dashboard <- function() {
   targets <- openxlsx2::read_xlsx(us_settings_path, sheet = "targets")
   targets <- stats::setNames(as.numeric(targets$target), targets$variable)
 
-  # `import_baseline()`'s `translate_baseline()` step only recognizes columns
-  # matching ITS OWN `source_model`'s metadata (columns from other models are
-  # dropped with a warning) - so each model's baseline must be translated
-  # separately (against `models = models` for full cross-model unit
-  # validation) and then merged, rather than built as one combined data frame
-  # translated against a single source model.
-  baseline_dates <- seq(timeline$data_start, timeline$data_end, by = "quarter")
-  sw_baseline_df <- sw_build_baseline(sw_model, baseline_dates)
-  baseline <- ezdyn::import_baseline(input = sw_baseline_df, source_model = sw_model, models = models)
-  for (extra_model in extra_models) {
-    extra_baseline_df <- dsgemoddash_build_synthetic_baseline(extra_model, baseline_dates)
-    extra_baseline <- ezdyn::import_baseline(input = extra_baseline_df, source_model = extra_model, models = models)
-    baseline <- dsgemoddash_merge_new_columns(baseline, extra_baseline)
-  }
-  baseline <- us_add_unemployment(baseline)
+  # The FRED/SEP baseline (the workbook's first sheet), already in display
+  # names and units, for every model: SW's observables and Gali Unemployment
+  # (2010)'s "Unemployment Rate", plus the variables derived from them.
+  # Variables with no US data (e.g. SW's model-consistent "Output", or the
+  # Gali models' "Output Gap") aren't in it, so they aren't offered in
+  # Alternative Paths or Optimal Policy.
+  baseline <- ezdyn::import_baseline(us_baseline_path, models = models)
 
   config <- ezdyn::configure_dashboard(
     name = "ezdyn Dashboard (USA)",
@@ -306,11 +229,11 @@ usa_dashboard <- function() {
     irf = list(defaults = list(display_names = c("Nominal Interest Rate", "Inflation"), horizon = 20)),
     # The 7 curated Pfeifer NK models remain selectable for Alternative Paths
     # (they share "Nominal Interest Rate"/"Monetary policy shock" with SW),
-    # but only Smets Wouters (2007) is selected by default - it is the only
-    # model with a real historical baseline; the others use synthetic
-    # steady-state baselines. Year-ended inflation and output growth and the
-    # nominal rate are plotted by default, with anticipated shocks at an
-    # anticipation (cognitive discounting) parameter of 0.8.
+    # but only Smets Wouters (2007) is selected by default - it is estimated
+    # on the US data the baseline uses. Selecting several models offers the
+    # variables they share that have US data. Year-ended inflation and output
+    # growth and the nominal rate are plotted by default, with anticipated
+    # shocks at an anticipation (cognitive discounting) parameter of 0.8.
     alt_paths = list(defaults = list(
       models = "Smets Wouters (2007)",
       display_names = c("Inflation (year-ended)", "Output Growth (year-ended)", "Nominal Interest Rate"),
@@ -344,12 +267,12 @@ usa_dashboard <- function() {
       # forecast start, and Commitment is ordinary commitment.
       preloss_start = if (!is.null(vintages)) min(vintages$vintage),
       loss_variable_vintages = vintages,
-      # The loss variables with past gaps in `vintages`, which timeless
-      # commitment needs. "Unemployment Rate" is offered while Gali
-      # Unemployment (2010), the only model with it, is the only model
-      # selected.
+      # The loss variables with US data in the baseline and past gaps in
+      # `vintages`, which timeless commitment needs. "Unemployment Rate" is
+      # offered while Gali Unemployment (2010), the only model with it, is the
+      # only model selected.
       loss_variable_choices = c(
-        "Inflation", "Output", "Output Growth", "Output Growth (year-ended)",
+        "Inflation", "Output Growth", "Output Growth (year-ended)",
         "Nominal Interest Rate Changes", "Unemployment Rate"
       ),
       constraint_variable_choices = c("Nominal Interest Rate", "Inflation"),

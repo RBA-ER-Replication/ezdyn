@@ -3,7 +3,7 @@
 # This module owns optimal-policy inputs and session-local IRF caching. ezdyn
 # owns the optimisation and returns labelled, rescaled paths.
 
-#' Return response-variable choices common to selected policy models.
+#' Return response-variable choices common to selected policy models
 #'
 #' Response variables are display-name-valued (not one model's own dynare
 #' codes) so the same selection resolves against every selected model,
@@ -11,10 +11,29 @@
 #' [irf_common_choices()]/[irf_model_display_names()] helpers the Alt Paths
 #' tab uses for its model-dependent response selector.
 #'
+#' With `baseline`, only variables the baseline has are offered, as in the
+#' Alt Paths tab: a policy path can't be plotted around a variable with no
+#' baseline data.
+#'
 #' @param models Named list of selected policy-model MOO pairs.
+#' @param baseline Optional baseline (as prepared for the tab) whose columns
+#'   limit the choices.
 #' @return Named character vector of display names common to every model.
-optimal_policy_response_choices <- function(models) {
-  irf_common_choices(models, irf_model_display_names)
+optimal_policy_response_choices <- function(models, baseline = NULL) {
+  choices <- irf_common_choices(models, irf_model_display_names)
+  if (is.null(baseline)) return(choices)
+  choices[unname(choices) %in% setdiff(names(baseline), "date")]
+}
+
+# Return a baseline as the tab uses it: after the configured
+# `prepare_baseline` and `extend_baseline` hooks (unchanged if not set).
+optimal_policy_prepare_baseline <- function(baseline, config) {
+  policy <- config$optimal_policy
+  if (is.function(policy$prepare_baseline)) {
+    baseline <- policy$prepare_baseline(baseline, config$models[[policy$baseline_model]], policy)
+  }
+  if (is.function(policy$extend_baseline)) baseline <- policy$extend_baseline(baseline, policy)
+  baseline
 }
 
 #' Return the configured loss variables offered by the Optimal Policy tab.
@@ -250,7 +269,10 @@ UITab_OptimalPolicy <- function(id, config) {
   policy <- config$optimal_policy
   model_choices <- irf_choices(policy$models)
   selected_models <- irf_preserve_selection(policy$defaults$models, model_choices)
-  choices <- optimal_policy_response_choices(config$models[selected_models])
+  choices <- optimal_policy_response_choices(
+    config$models[selected_models],
+    optimal_policy_prepare_baseline(config$baselines[[config$default_baseline]], config)
+  )
   loss_choices <- optimal_policy_loss_choices(config, config$models[selected_models])
   policy_dates <- seq(policy$forecast_start, policy$forecast_end, by = "quarter")
   plot_range <- optimal_policy_default_plot_range(config$timeline, policy$forecast_end)
@@ -362,9 +384,10 @@ ServerTab_OptimalPolicy <- function(id, config) {
       shiny::req(input$models)
       config$models[input$models]
     })
-    responses <- shiny::reactive(optimal_policy_response_choices(selected_models()))
+    responses <- shiny::reactive(optimal_policy_response_choices(selected_models(), prepared_baseline()))
     loss_choices <- shiny::reactive(optimal_policy_loss_choices(config, selected_models()))
-    shiny::observeEvent(input$models, {
+    # Refresh the choices when the models or the baseline change.
+    shiny::observeEvent(list(input$models, prepared_baseline()), {
       shiny::updateSelectizeInput(
         session,
         "response_variables",
@@ -387,11 +410,7 @@ ServerTab_OptimalPolicy <- function(id, config) {
       if (input$baseline_name %in% choices) input$baseline_name else config$default_baseline
     })
     active_baseline <- shiny::reactive(baseline_registry()[[active_baseline_name()]])
-    prepared_baseline <- shiny::reactive({
-      baseline <- active_baseline()
-      baseline <- policy$prepare_baseline(baseline, baseline_model, policy)
-      policy$extend_baseline(baseline, policy)
-    })
+    prepared_baseline <- shiny::reactive(optimal_policy_prepare_baseline(active_baseline(), config))
     output$message <- shiny::renderUI({
       notes <- tryCatch(result()$notes, error = function(e) NULL)
       if (length(notes) == 0) return(NULL)
@@ -502,12 +521,10 @@ ServerTab_OptimalPolicy <- function(id, config) {
 
     shiny::observeEvent(input$import_baseline, {
       shiny::req(input$uploaded_baseline)
-      source_label <- if (identical(input$upload_interpretation, "display")) {
-        config$baseline_upload$default_source_model
-      } else {
-        input$upload_source_model
-      }
-      shiny::req(source_label)
+      # A "Default template" upload is in display names, which any model may
+      # use; a "Model input" upload is in the chosen model's codes.
+      display_upload <- identical(input$upload_interpretation, "display")
+      if (!display_upload) shiny::req(input$upload_source_model)
       tryCatch({
         baseline_name <- alt_paths_upload_name(
           input$uploaded_baseline_name,
@@ -515,7 +532,7 @@ ServerTab_OptimalPolicy <- function(id, config) {
         )
         imported <- import_baseline(
           input = input$uploaded_baseline$datapath,
-          source_model = config$models[[source_label]],
+          source_model = if (display_upload) NULL else config$models[[input$upload_source_model]],
           models = config$models
         )
         dashboard_validate_baseline_coverage(imported, config$timeline, baseline_name)

@@ -222,7 +222,6 @@ name and in dashboard units, as `vintage` and `date` rows:
 | `Unemployment Rate_gap_loss` | Unemployment rate less the target, in percentage points | The Fed's NAIRU estimate at the time: the SEP's longer-run unemployment median (`UNRATEMDLR`) in that quarter |
 | `Output Growth_gap_loss` | Quarterly real GDP growth less the target | The Fed's estimate of potential growth at the time: the SEP's longer-run GDP growth median (`GDPC1MDLR`) in that quarter, converted to a quarterly log change |
 | `Output Growth (year-ended)_gap_loss` | Real GDP growth over the last four quarters (the sum of quarterly growth) less the target | The same potential growth estimate, as a log change over the year |
-| `Output_gap_loss` | Zero: SW's "Output" has no data and stays at steady state, as in the baseline | Steady state |
 
 It also has `Nominal Interest Rate` (annualised), the instrument's level, for
 the ELB. `vintage_levels` holds each vintage's `baseline` columns and its
@@ -232,12 +231,11 @@ targets, in display units: `Inflation target`, `Unemployment Rate target`
 year-ended log changes). Each gap in `vintages` is the level less its target.
 
 Timeless commitment needs a vintage column for every loss variable selected,
-so the tab offers only these six as loss variables (Inflation, Output Growth and
+so the tab offers only these five as loss variables (Inflation, Output Growth and
 Nominal Interest Rate Changes by default). "Unemployment Rate" is offered
 only while Gali Unemployment (2010), the only model with it, is the only
 model selected. Its baseline is the US unemployment rate (the `baseline`
-sheet's "Unemployment Rate", history then the path to the SEP), not the
-model's steady state.
+sheet's "Unemployment Rate", history then the path to the SEP).
 
 The tab measures the current quarter's gaps from its target inputs, which
 default to the `targets` sheet: the same targets the vintages use, as they
@@ -517,8 +515,8 @@ Where a model's own label differs (e.g. "Price Inflation", "Employment"),
   times too small.
 - **Smets-Wouters "Output" has no data.** SW observes only output growth, so
   "Output" is its model-consistent `y` (previously "Output (model-consistent)").
-  Its baseline stays at steady state (zero), so Alternative Paths shows it as
-  a deviation from baseline.
+  With no US data it isn't in the baseline, so it's only in the Impulse
+  Response Library, not Alternative Paths or Optimal Policy.
 
 No model needed output to be approximated by the output gap: each has its own
 output variable.
@@ -535,10 +533,12 @@ variable appears:
 | `hsd` | Historical Shock Decomposition |
 
 A blank or missing `irf` or `alt_paths` means the variable is offered. Both
-tabs list only variables offered by every selected model. SW's
-model-consistent series have `alt_paths = FALSE`. So in Alternative Paths, SW
-offers its seven observables, "Inflation (year-ended)", "Nominal Interest
-Rate (quarterly)" and "Output".
+tabs list only variables offered by every selected model. Alternative Paths
+and Optimal Policy also only offer variables that are in the baseline, i.e.
+that have US data or are derived from it. So in Alternative Paths, SW offers
+its seven observables and the variables derived from them (e.g. "Inflation
+(year-ended)"); the other models offer the variables they share with that
+data.
 
 ### Unit symbols
 

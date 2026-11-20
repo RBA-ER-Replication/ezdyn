@@ -236,8 +236,6 @@ timeline <- tibble(
 #   - Output Growth (year-ended): the sum of the last four quarters' Output
 #     Growth (as the dashboard derives it), less the potential growth
 #     estimate over a year
-#   - Output: SW's model-consistent output has no data counterpart, so, as in
-#     the dashboard baseline, it stays at its steady state, also its target
 # The rate itself (`Nominal Interest Rate`) is kept for the ELB constraint.
 # `levels` must start at least three quarters before `vintage`, so the first
 # rate change and year-ended growth are defined.
@@ -251,7 +249,6 @@ loss_gaps <- function(levels, vintage) {
       `Output Growth_gap_loss` = `Output Growth` - `Output Growth target`,
       `Output Growth (year-ended)_gap_loss` = `Output Growth` + lag(`Output Growth`) + lag(`Output Growth`, 2) +
         lag(`Output Growth`, 3) - `Output Growth (year-ended) target`,
-      `Output_gap_loss` = 0,
       `Nominal Interest Rate`
     ) |>
     filter(date >= vintage) |>

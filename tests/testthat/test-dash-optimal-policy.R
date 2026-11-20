@@ -104,6 +104,18 @@ testthat::test_that("Optimal Policy offers the response display names every sele
   testthat::expect_equal(optimal_policy_response_choices(list()), character())
 })
 
+testthat::test_that("Optimal Policy only offers response variables the baseline has", {
+  with_growth <- dashboard_test_model("DINGO", include_gdp_growth = TRUE)
+  baseline <- data.frame(date = as.Date("2024-03-01"), check.names = FALSE)
+  baseline[["Cash Rate"]] <- 4
+  baseline[["GDP Growth"]] <- 0.5 # no "Inflation" data
+
+  testthat::expect_equal(
+    optimal_policy_response_choices(list(DINGO = with_growth), baseline),
+    c("Cash Rate" = "Cash Rate", "GDP Growth" = "GDP Growth")
+  )
+})
+
 testthat::test_that("Optimal Policy maps the Commitment control to timeless commitment", {
   input <- list(
     strategy_modes = c("timeless", "disc"),

@@ -2,16 +2,28 @@
 % Please edit documentation in R/dash_optimal_policy_tab.R
 \name{optimal_policy_response_choices}
 \alias{optimal_policy_response_choices}
-\title{Return available policy response choices from model metadata.}
+\title{Return response-variable choices common to selected policy models}
 \usage{
-optimal_policy_response_choices(model)
+optimal_policy_response_choices(models, baseline = NULL)
 }
 \arguments{
-\item{model}{Full policy-model MOO pair.}
+\item{models}{Named list of selected policy-model MOO pairs.}
+
+\item{baseline}{Optional baseline (as prepared for the tab) whose columns
+limit the choices.}
 }
 \value{
-Named character vector from display names to model codes.
+Named character vector of display names common to every model.
 }
 \description{
-Return available policy response choices from model metadata.
+Response variables are display-name-valued (not one model's own dynare
+codes) so the same selection resolves against every selected model,
+however different their underlying codes are - reuses the same
+[irf_common_choices()]/[irf_model_display_names()] helpers the Alt Paths
+tab uses for its model-dependent response selector.
+}
+\details{
+With `baseline`, only variables the baseline has are offered, as in the
+Alt Paths tab: a policy path can't be plotted around a variable with no
+baseline data.
 }

@@ -337,19 +337,32 @@ ezdyn_read_baseline_input <- function(input) {
   ezdyn_read_baseline_workbook(input)
 }
 
-#' Translate a normalized baseline to canonical display-name columns.
+# Every display name any of `models` defines (the names a display-name
+# baseline column may use).
+ezdyn_model_display_names <- function(models) {
+  displays <- unlist(lapply(models, function(model) as.character(model$M_$varmeta$display_name)), use.names = FALSE)
+  unique(displays[!is.na(displays) & displays != ""])
+}
+
+#' Translate a normalized baseline to canonical display-name columns
 #'
-#' Matches exact source-model display names before exact Dynare names. Display-name
-#' columns are already in general units and are not rescaled; Dynare-name columns
-#' are rescaled once with the source model metadata.
+#' Each input column is either a display name of one of the models, kept as
+#' it is (it's already in display units), or - only when `source_model` is
+#' given - one of `source_model`'s Dynare names, rescaled once with its
+#' metadata and renamed to its display name. `source_model`'s own display and
+#' Dynare names take precedence over the other models' display names. Other
+#' columns are dropped with a warning.
 #'
 #' @param baseline A data frame with normalized `date` column.
-#' @param source_model Full source MOO pair used to interpret input columns.
+#' @param source_model Optional full MOO pair whose Dynare names the input may
+#'   use, or `NULL` for a baseline in display names only.
+#' @param models Named list of full MOO pairs whose display names the input
+#'   may use.
 #'
 #' @return A tibble with `date` and unique display-name columns.
 #' @keywords internal
-translate_baseline <- function(baseline, source_model) {
-  source_map <- ezdyn_baseline_source_map(source_model)
+translate_baseline <- function(baseline, source_model = NULL, models = list()) {
+  source_map <- if (!is.null(source_model)) ezdyn_baseline_source_map(source_model)
   if (!is.data.frame(baseline) || !("date" %in% names(baseline)) || !inherits(baseline$date, "Date")) {
     stop("`baseline` must be a normalized data frame with a Date `date` column.", call. = FALSE)
   }
@@ -362,45 +375,66 @@ translate_baseline <- function(baseline, source_model) {
     stop("Baseline input has no variable columns.", call. = FALSE)
   }
 
-  display_matches <- match(input_names, source_map$display_name)
-  dynare_matches <- match(input_names, source_map$dynare_name)
-  source_kind <- ifelse(!is.na(display_matches), "display", ifelse(!is.na(dynare_matches), "dynare", NA_character_))
-  map_index <- ifelse(!is.na(display_matches), display_matches, dynare_matches)
+  # 1. Resolve each column: the source model's display or Dynare name first,
+  # then any model's display name.
+  source_display <- if (is.null(source_map)) rep(NA_integer_, length(input_names)) else match(input_names, source_map$display_name)
+  source_dynare <- if (is.null(source_map)) rep(NA_integer_, length(input_names)) else match(input_names, source_map$dynare_name)
+  model_display <- input_names %in% ezdyn_model_display_names(models)
+  source_kind <- ifelse(
+    !is.na(source_display), "source_display",
+    ifelse(!is.na(source_dynare), "dynare", ifelse(model_display, "display", NA_character_))
+  )
+  translated_names <- ifelse(
+    source_kind == "source_display", source_map$display_name[source_display],
+    ifelse(source_kind == "dynare", source_map$display_name[source_dynare], input_names)
+  )
+
   unknown_names <- input_names[is.na(source_kind)]
   if (length(unknown_names) > 0) {
+    # Model codes in a display-name baseline need `source_model` to translate.
+    codes <- unlist(lapply(models, function(model) as.character(model$M_$varmeta$dynare_name)), use.names = FALSE)
+    hint <- if (is.null(source_model) && any(unknown_names %in% codes)) {
+      " Some look like model variable codes: to translate a baseline written in one model's codes, supply that model as `source_model`."
+    } else {
+      ""
+    }
     warning(
-      sprintf("Ignoring unknown baseline column(s): %s.", paste(sprintf("`%s`", unknown_names), collapse = ", ")),
+      sprintf("Ignoring unknown baseline column(s): %s.%s", paste(sprintf("`%s`", unknown_names), collapse = ", "), hint),
       call. = FALSE
     )
   }
 
-  translated_names <- source_map$display_name[map_index[!is.na(map_index)]]
-  if (length(translated_names) == 0) {
-    stop("No baseline columns could be resolved from `source_model` metadata.", call. = FALSE)
+  resolved <- !is.na(source_kind)
+  if (!any(resolved)) {
+    stop(
+      if (is.null(source_model)) {
+        "No baseline columns match a display name of `models`."
+      } else {
+        "No baseline columns match a display name of `models` or a variable of `source_model`."
+      },
+      call. = FALSE
+    )
   }
-  if (anyDuplicated(translated_names)) {
-    duplicate_names <- unique(translated_names[duplicated(translated_names)])
+  if (anyDuplicated(translated_names[resolved])) {
+    duplicate_names <- unique(translated_names[resolved][duplicated(translated_names[resolved])])
     stop(
       sprintf("Multiple input columns translate to the same display name: %s.", paste(sprintf("`%s`", duplicate_names), collapse = ", ")),
       call. = FALSE
     )
   }
 
+  # 2. Copy display-name columns as they are; rescale Dynare-name columns once.
   out <- list(date = baseline$date)
-  resolved_positions <- which(!is.na(map_index))
-  for (position in resolved_positions) {
+  for (position in which(resolved)) {
     input_name <- input_names[[position]]
     values <- baseline[[input_name]]
     if (!is.numeric(values)) {
       stop(sprintf("Baseline column `%s` must be numeric.", input_name), call. = FALSE)
     }
-
-    map_row <- source_map[map_index[[position]], , drop = FALSE]
-    display_name <- map_row$display_name[[1]]
-    out[[display_name]] <- if (source_kind[[position]] == "display") {
-      values
+    out[[translated_names[[position]]]] <- if (source_kind[[position]] == "dynare") {
+      ezdyn_rescale_baseline_values(values, source_model, source_map[source_dynare[[position]], , drop = FALSE])
     } else {
-      ezdyn_rescale_baseline_values(values, source_model, map_row)
+      values
     }
   }
   tibble::as_tibble(out)
@@ -408,73 +442,144 @@ translate_baseline <- function(baseline, source_model) {
 
 # Exported Function ----
 
-# Add metadata-declared derived display-name columns to a translated
-# (display-name-keyed) baseline, computed from the source model's own raw
-# source column already present under its display name. Mirrors
-# `augment_derived_variables()` (dynare-name-keyed, used for model-code
-# baselines), including applying the derived variable's own `scale_factor` on
-# top of its transform, but resolves both the derived variable and its source
-# to their default display name first, since a translated baseline is
-# display-name-keyed.
-ezdyn_augment_derived_baseline <- function(baseline, source_model) {
-  source_map <- ezdyn_baseline_source_map(source_model)
-  lookup <- ezdyn_derived_variable_lookup(source_model$M_$varmeta)
-  name_for <- stats::setNames(source_map$display_name, source_map$dynare_name)
-
-  for (variable in names(lookup)) {
-    target_display_name <- unname(name_for[variable])
-    if (is.na(target_display_name) || target_display_name %in% names(baseline)) next
-    derived <- lookup[[variable]]
-    source_display_name <- unname(name_for[derived$source])
-    if (is.na(source_display_name) || !(source_display_name %in% names(baseline))) next
-    value <- if (is.na(derived$transform)) {
-      baseline[[source_display_name]]
-    } else {
-      ezdyn_derived_transform_registry[[derived$transform]](baseline[[source_display_name]])
-    }
-    baseline[[target_display_name]] <- ezdyn_own_scale(source_model$M_$varmeta, variable)(value)
+# Return a model's Dynare name -> display name map: each code's one default
+# display name. Codes without exactly one are left out.
+ezdyn_display_name_lookup <- function(varmeta) {
+  codes <- as.character(varmeta$dynare_name)
+  displays <- as.character(varmeta$display_name)
+  keep <- !is.na(codes) & codes != "" & !is.na(displays) & displays != ""
+  if ("default" %in% names(varmeta)) {
+    is_default <- varmeta$default %in% TRUE
+    has_default <- codes %in% codes[keep & is_default]
+    keep <- keep & (is_default | !has_default)
   }
-  baseline
+  codes <- codes[keep]
+  displays <- displays[keep]
+  single <- vapply(codes, function(code) length(unique(displays[codes == code])) == 1, logical(1))
+  unique_codes <- unique(codes[single])
+  stats::setNames(displays[match(unique_codes, codes)], unique_codes)
 }
 
-#' Import a canonical baseline for one or more models.
+# Add metadata-declared derived display-name columns to a translated
+# (display-name-keyed) baseline. Each model's derived variables are computed
+# from columns already in the baseline, under display names, applying the
+# derived variable's own `scale_factor` on top of its transform (as
+# `augment_derived_variables()` does for model-code baselines). A column
+# already in the baseline is never replaced, and a column that several models
+# can derive comes from the first model in `models` that can. Repeats until
+# nothing more can be derived, so one model can derive from another's derived
+# column.
+ezdyn_augment_derived_baseline <- function(baseline, models) {
+  repeat {
+    added <- FALSE
+    for (model in models) {
+      varmeta <- model$M_$varmeta
+      lookup <- ezdyn_derived_variable_lookup(varmeta)
+      name_for <- ezdyn_display_name_lookup(varmeta)
+      for (variable in names(lookup)) {
+        target_display_name <- unname(name_for[variable])
+        if (is.na(target_display_name) || target_display_name %in% names(baseline)) next
+        derived <- lookup[[variable]]
+        source_display_name <- unname(name_for[derived$source])
+        if (is.na(source_display_name) || !(source_display_name %in% names(baseline))) next
+        value <- if (is.na(derived$transform)) {
+          baseline[[source_display_name]]
+        } else {
+          ezdyn_derived_transform_registry[[derived$transform]](baseline[[source_display_name]])
+        }
+        baseline[[target_display_name]] <- ezdyn_own_scale(varmeta, variable)(value)
+        added <- TRUE
+      }
+    }
+    if (!added) return(baseline)
+  }
+}
+
+#' Import a baseline forecast for one or more models
 #'
-#' Reads an `.xls`/`.xlsx` workbook or in-memory data frame, normalizes a
-#' standard or `YYYYQq` date column, translates source Dynare names to display
-#' names, and validates units shared by the target models. The workbook reader
-#' uses `openxlsx2` first and falls back to `readxl` for legacy `.xls`
-#' compatibility. Exact display-name input columns are assumed to already be in
-#' general units and are not rescaled. Exact Dynare-name input columns are
-#' rescaled once using the source model metadata.
+#' @description
+#' Reads a baseline - history and forecast, one column per variable - and
+#' returns it in the form the dashboard and [get_alt_paths()] use: a `date`
+#' column and one column per variable, named by display name and in display
+#' units. It works in one of two modes:
+#'
+#' * **Display names** (`source_model = NULL`, the default): every column is a
+#'   display name of one of `models`, already in display units (e.g.
+#'   "Inflation", "Nominal Interest Rate"). Columns are kept as they are, so
+#'   one baseline can hold variables from several models.
+#' * **One model's codes** (`source_model` given): columns may also be
+#'   `source_model`'s own variable codes, in its model units (e.g. `pinfobs`,
+#'   `robs`). They are rescaled once, with its metadata's `scale_factor`, and
+#'   renamed to their display names. Display-name columns of `source_model`
+#'   or of `models` are accepted too.
+#'
+#' Columns that match nothing are dropped with a warning. The dates may be in
+#' a standard date format or as `YYYYQq`; workbooks are read with `openxlsx2`,
+#' falling back to `readxl` for legacy `.xls` files.
+#'
+#' The baseline also gains every derived variable (e.g. year-ended inflation,
+#' or the change in the policy rate) that the models' metadata defines from
+#' columns it has. A column you supply is never replaced, and a column that
+#' several models could derive comes from the first model (`source_model`,
+#' then `models` in order) that can.
+#'
+#' Finally, it checks that every model sharing a display name gives it the
+#' same units.
+#'
+#' The baseline only has the variables you supply and those derived from
+#' them: a variable with no baseline data can't be plotted as an alternative
+#' path.
 #'
 #' @param input `.xls`/`.xlsx` path or data frame containing a date column and
 #'   baseline values.
-#' @param source_model Full MOO pair whose metadata defines source columns.
-#' @param models Named list of full MOO pairs that will use the baseline.
+#' @param source_model Optional: a model (a full MOO pair) whose variable codes
+#'   the input uses. `NULL` (the default) for a baseline in display names.
+#' @param models Named list of models (full MOO pairs) that will use the
+#'   baseline; their display names are the column names accepted.
 #' @param date_col Optional date-column name or one-based position. When omitted,
 #'   an exact case-insensitive `date` column is used; otherwise the first column
 #'   is used.
 #'
-#' @return A tibble with a `Date` `date` column followed by unique canonical
-#'   display-name columns in general units.
+#' @return A tibble with a `Date` `date` column followed by unique display-name
+#'   columns in display units.
+#'
+#' @examples
+#' \dontrun{
+#' models <- list("Smets Wouters (2007)" = sw, "Gali Unemployment (2010)" = gali)
+#'
+#' # A baseline in display names, with variables from both models
+#' baseline <- import_baseline("baseline.xlsx", models = models)
+#'
+#' # A baseline in Smets-Wouters' own codes and units (e.g. `robs`, quarterly)
+#' baseline <- import_baseline("sw_data.xlsx", source_model = sw, models = models)
+#' }
+#' @md
 #' @export
-import_baseline <- function(input, source_model, models, date_col = NULL) {
+import_baseline <- function(input, source_model = NULL, models, date_col = NULL) {
   # 1. Validate all model metadata before any input transformation.
-  ezdyn_validate_baseline_moo(source_model, "source_model")
+  if (!is.null(source_model)) {
+    if (is.list(source_model) && !all(c("M_", "oo_") %in% names(source_model)) &&
+        length(source_model) > 0 && all(vapply(source_model, function(x) is.list(x) && all(c("M_", "oo_") %in% names(x)), logical(1)))) {
+      stop("`source_model` must be one model; pass the list of models as `models = ...`.", call. = FALSE)
+    }
+    ezdyn_validate_baseline_moo(source_model, "source_model")
+  }
   ezdyn_validate_baseline_models(models)
+  source_models <- if (is.null(source_model)) list() else list(source_model)
 
-  # 2. Normalize the raw table and translate it using the specified source model.
+  # 2. Normalize the raw table, translate it to display names, and add the
+  # models' derived variables.
   baseline <- ezdyn_read_baseline_input(input) |>
     ezdyn_parse_baseline_dates(date_col = date_col) |>
-    translate_baseline(source_model = source_model) |>
-    ezdyn_augment_derived_baseline(source_model = source_model)
+    translate_baseline(source_model = source_model, models = models) |>
+    ezdyn_augment_derived_baseline(models = c(source_models, unname(models)))
 
-  # 3. Confirm that every shared display name has compatible target-model units.
+  # 3. Confirm that every shared display name has compatible units.
   source_model_name <- ".source_model"
   while (source_model_name %in% names(models)) {
     source_model_name <- paste0(source_model_name, "_")
   }
-  validate_display_names(baseline, c(stats::setNames(list(source_model), source_model_name), models))
+  validate_display_names(baseline, c(stats::setNames(source_models, if (length(source_models)) source_model_name), models))
   class(baseline) <- c("ezdyn_baseline", class(baseline))
   baseline
 }
