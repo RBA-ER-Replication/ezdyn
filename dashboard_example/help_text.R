@@ -1,4 +1,5 @@
-# Help guides shown by the dashboard's info buttons.
+# Help guides shown by the dashboard's info buttons, and the startup modal
+# (`usa_startup_modal`) shown when a session starts.
 #
 # To add a guide:
 #   1. Add an entry to `usa_help_guides` below, written in markdown. Its first
@@ -7,7 +8,7 @@
 #      and HTML, e.g. λ<sup>h</sup>, which displays without loading MathJax.
 #   2. Point a button at it in usa_dashboard.R with `usa_help("<name>")`:
 #      - Alternative Policy Paths' two buttons on anticipated shocks and the
-#        cognitive discounting parameter: configure_dashboard()'s
+#        anticipation parameter: configure_dashboard()'s
 #        `help = list(anticipated_shocks = ...)`.
 #      - Optimal Policy's buttons: `optimal_policy$help`, with names `cd` (the
 #        anticipation parameter), `strategy`, `loss_variables`,
@@ -20,7 +21,7 @@
 
 usa_help_guides <- list(
   anticipated_shocks = r"---(
-## Anticipated shocks and the cognitive discounting parameter
+## Anticipated shocks and the anticipation parameter
 For more explanation and technical detail, see [Sullivan and Ryan 2026](https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true).
 
 In forward-looking models, the dynamics of the economy today are influenced by how agents form their expectations for the future state of the economy.
@@ -35,10 +36,10 @@ The monetary policy shocks used to generate the alternative path can be either '
 
 **But it is also probably unrealistic to assume that alternative policy strategies would be fully anticipated.** It is unlikely that policy expectations of the public would always immediately jump to the central bank's new policy path. Further, the especially strong effects of anticipated policy rely on rational expectations assumptions that agents perfectly understand all the general equilibrium consequences of future policy and immediately adjust their behaviour accordingly.
 
-## Partial anticipation and the cognitive discounting parameter
+## Partial anticipation and the anticipation parameter
 As a result, we implement a 'partial anticipation' approach, which allows the responses of forward-looking models to be modified so that the future alternative monetary policy path is only partially anticipated by agents in the economy.
 
-Our approach assumes that, at any point in time, the shocks generating the change in the policy rate path set to occur in h quarters are λ<sup>h</sup> anticipated, and (1 − λ<sup>h</sup>) unanticipated, for some cognitive discount parameter λ ∈ [0, 1]. The rationale is that shocks occurring in the near future (e.g. next quarter) are likely anticipated by more people, and thus have a greater impact on current behaviour than shocks projected to occur in the distant future (e.g. 10 years time).
+Our approach assumes that, at any point in time, the shocks generating the change in the policy rate path set to occur in h quarters are λ<sup>h</sup> anticipated, and (1 − λ<sup>h</sup>) unanticipated, for some anticipation parameter λ ∈ [0, 1]. The rationale is that shocks occurring in the near future (e.g. next quarter) are likely anticipated by more people, and thus have a greater impact on current behaviour than shocks projected to occur in the distant future (e.g. 10 years time).
 )---"
 )
 
@@ -63,6 +64,31 @@ usa_help <- function(name) {
     shiny::modalDialog(title = title, size = "l", easyClose = TRUE, footer = shiny::modalButton("Close"), html)
   }
 }
+
+# Shown once when a session starts.
+usa_startup_modal <- shiny::modalDialog(
+  title = "ezdyn Dashboard demo",
+  shiny::p(
+    "This dashboard is an example of what can be built (easily!) using the ezdyn R package (",
+    shiny::a("see code", href = "https://github.com/RBA-ER-Replication/ezdyn/tree/main/dashboard_example", target = "_blank", .noWS = "outside"),
+    ")."
+  ),
+  shiny::p("To create your own and learn more about what ezdyn can do, see ",
+           shiny::a("Sullivan and Ryan (2026)", href = "https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true", target = "_blank", .noWS = "outside"),
+           "."),
+  shiny::p(shiny::tags$b("Warning:"), " The models and data in this dashboard are purely illustrative and have not had close quality control.",
+    " This includes the experimental code that loads models from Johannes Pfeifer's ",
+    shiny::a("DSGE model library", href = "https://github.com/JohannesPfeifer/DSGE_mod", target = "_blank", .noWS = "outside"),
+    ". Treat all results as indicative only."
+  ),
+  shiny::p(
+    shiny::tags$b("Feedback is welcome:")," please ",
+    shiny::a("raise an issue on GitHub", href = "https://github.com/RBA-ER-Replication/ezdyn/issues", target = "_blank", .noWS = "outside"),
+    "."
+  ),
+  footer = shiny::modalButton("Continue"),
+  easyClose = TRUE
+)
 
 
 
