@@ -6,6 +6,21 @@ plotting the results consistently across one or more models.
 
 It works with models exported from Dynare or just a dataframe of impulse responses.
 
+## Quickstart
+
+To quickly explore a demo, use the
+[live demo](https://01a1b082-f2eb-61b6-a308-c4c2c0261a0c.share.connect.posit.cloud/).
+
+To try ezdyn yourself:
+
+1. Install it: `remotes::install_github("RBA-ER-Replication/ezdyn")`.
+2. Set your working directory to `dashboard_example/` and run
+   `source("usa_dashboard.R")` to launch the example dashboard.
+
+See the
+[whitepaper](https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true)
+for full instructions, implementation details and an FAQ.
+
 ## Getting started
 See [Installation and loading a model](#installation-and-loading-a-model).
 
