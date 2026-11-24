@@ -358,7 +358,7 @@ irf_custom_plot_title <- function(mode, display_names, shock_display_names = NUL
 #' @param mode Current custom IRF mode.
 #' @param data Pretty IRF data.
 #' @param use_cd Whether cognitive discounting was requested.
-#' @param lambda Cognitive-discounting parameter.
+#' @param lambda Anticipation parameter.
 #' @param shock_display_names Selected title-cased shock labels.
 #' @param target_display_name Metadata display name of the calibrated target.
 #' @param target_value First-quarter calibrated target in displayed units.
@@ -477,7 +477,7 @@ irf_validate_model_shocks <- function(models, model_shocks) {
 #' @param model_shocks Named native shock codes, one per model.
 #' @param horizon Positive integer IRF horizon.
 #' @param use_cd Whether cognitive discounting was requested.
-#' @param lambda Cognitive-discounting parameter.
+#' @param lambda Anticipation parameter.
 #'
 #' @return A pretty IRF data frame.
 irf_run_targeted <- function(

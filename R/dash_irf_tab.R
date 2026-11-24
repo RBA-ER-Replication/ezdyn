@@ -170,7 +170,7 @@ UITab_IRF <- function(id, config) {
               condition = sprintf("input['%s'] === true", ns("target_use_cd")),
               shiny::sliderInput(
                 ns("target_lambda"),
-                "Cognitive discounting parameter:",
+                "Anticipation parameter:",
                 0,
                 1,
                 defaults$lambda,

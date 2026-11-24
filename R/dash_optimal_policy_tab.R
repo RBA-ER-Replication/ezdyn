@@ -307,7 +307,7 @@ UITab_OptimalPolicy <- function(id, config) {
         selected = selected_models,
         multiple = TRUE
       ),
-      shiny::numericInput(ns("lambda"), shiny::tagList("Anticipation Parameter", help_button(ns("help_cd"))), policy$lambda, min = 0, max = 1, step = 0.1),
+      shiny::numericInput(ns("lambda"), shiny::tagList("Anticipation parameter", help_button(ns("help_cd"))), policy$lambda, min = 0, max = 1, step = 0.1),
       shiny::h4("Baseline details"),
       shiny::selectInput(
         ns("baseline_name"),

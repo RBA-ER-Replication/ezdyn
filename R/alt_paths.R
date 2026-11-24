@@ -401,7 +401,7 @@ ezdyn_alt_path_model_result <- function(inputs, model, model_name, baseline_leve
 #' @param models Named list of full model MOO pairs.
 #' @param baseline Canonical result of [import_baseline()].
 #' @param use_cd Whether to use cognitive discounting where supported.
-#' @param lambda Cognitive discounting parameter in $[0, 1]$.
+#' @param lambda Anticipation parameter in $[0, 1]$.
 #' @param instrument_display_name Instrument variable display or Dynare name.
 #' @param instrument_shock_name Instrument shock description or code.
 #' @param forecast_start First forecast quarter.

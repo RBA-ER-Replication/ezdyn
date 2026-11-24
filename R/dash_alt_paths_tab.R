@@ -168,7 +168,7 @@ UITab_AltPaths <- function(id, config) {
         shiny::numericInput(
           ns("lambda"),
           shiny::tagList(
-            "Cognitive discounting parameter: ",
+            "Anticipation parameter: ",
             help_button(ns("help_cognitive_discounting"))
           ),
           value = dashboard_or_default(config$alt_paths$defaults$lambda, 0.8),
@@ -290,7 +290,7 @@ ServerTab_AltPaths <- function(id, config) {
       shiny::showModal(dash_help_modal(config$help$anticipated_shocks, "Anticipated shocks"))
     }, ignoreInit = TRUE)
     shiny::observeEvent(input$help_cognitive_discounting, {
-      shiny::showModal(dash_help_modal(config$help$anticipated_shocks, "Cognitive discounting parameter"))
+      shiny::showModal(dash_help_modal(config$help$anticipated_shocks, "Anticipation parameter"))
     }, ignoreInit = TRUE)
 
     # 3.3. Refresh compatible response selections whenever the selected

@@ -263,12 +263,6 @@ dashboard_validate_hsd_config <- function(hsd, models) {
   # than letting users pick a model that will error or produce meaningless
   # output (applies whether `hsd$models` was defaulted or set explicitly).
   hsd$models <- Filter(function(nm) hsd_data_available(models[[nm]]$oo_), hsd$models)
-  if (length(hsd$models) == 0) {
-    stop(
-      "None of the configured `hsd$models` have historical shock decomposition data (`oo_$SmoothedShocks`/`SmoothedVariables`); the Historical Shock Decomposition tab requires at least one estimated/smoothed model.",
-      call. = FALSE
-    )
-  }
 
   hsd
 }
@@ -555,8 +549,8 @@ dashboard_validate_optimal_policy_config <- function(optimal_policy, models, tim
   }
   forecast_end <- dashboard_or_default(optimal_policy$forecast_end, NULL)
   preloss_start <- dashboard_or_default(optimal_policy$preloss_start, timeline$forecast_start)
-  instrument_variable <- dashboard_or_default(optimal_policy$instrument_variable, "r_obs")
-  instrument_shock <- dashboard_or_default(optimal_policy$instrument_shock, "eps_r")
+  instrument_variable <- dashboard_or_default(optimal_policy$instrument_variable, "Cash Rate")
+  instrument_shock <- dashboard_or_default(optimal_policy$instrument_shock, "Monetary policy shock")
   use_cd <- dashboard_or_default(optimal_policy$use_cd, FALSE)
   lambda <- dashboard_or_default(optimal_policy$lambda, 0)
   prepare_baseline <- dashboard_or_default(optimal_policy$prepare_baseline, function(baseline, model, policy_config) baseline)
@@ -754,9 +748,9 @@ dashboard_validate_plotters <- function(plotters) {
 #' * **`default_baseline`**: the name of the baseline selected when the
 #'   dashboard opens.
 #'
-#' One more requirement: at least one model must have a historical shock
-#' decomposition (an estimated Dynare model, with smoothed shocks and
-#' variables), because the Historical Shock Decomposition tab is always shown.
+#' The Historical Shock Decompositions tab is omitted when none of the
+#' selected HSD models has smoothed shocks and variables. Dashboards made
+#' entirely from IRF spreadsheets or calibrated models are supported.
 #'
 #' @section The tabs:
 #'
@@ -765,7 +759,7 @@ dashboard_validate_plotters <- function(plotters) {
 #' | Overview | Only if `overview` supplies content | `overview` |
 #' | Alternative Policy Paths | Always | `alt_paths`, the instrument settings |
 #' | Impulse Response Library | Always | `irf` |
-#' | Historical Shock Decompositions | Always (needs one model with a decomposition) | `hsd` |
+#' | Historical Shock Decompositions | Only if an eligible model has a decomposition | `hsd` |
 #' | Optimal Policy | Only if `optimal_policy` is supplied | `optimal_policy` |
 #'
 #' Every tab works with its defaults, except Optimal Policy, which needs a
@@ -798,7 +792,9 @@ dashboard_validate_plotters <- function(plotters) {
 #' all optional:
 #'
 #' * `models`: the models offered. Defaults to every model; models without a
-#'   historical shock decomposition are dropped automatically.
+#'   historical shock decomposition are dropped automatically. The returned
+#'   `hsd$models` may be empty, in which case neither the tab nor its server
+#'   module is loaded. Invalid model labels still raise an error.
 #' * `display_names`: the variables selected when the tab opens (default
 #'   none).
 #' * `shock_group`: the shock grouping selected when the tab opens. A grouping
@@ -813,8 +809,8 @@ dashboard_validate_plotters <- function(plotters) {
 #' The user sets a path for the policy rate, one slider per forecast quarter,
 #' and the tab shows each model's response: the policy shocks that would
 #' deliver that path, and their effects on the other variables. Optionally,
-#' it uses anticipated (announced) shocks, for models that have them, with a
-#' "cognitive discounting" parameter that sets how far ahead people look.
+#' it uses anticipated (announced) shocks, for models that have them, with an
+#' "anticipation" parameter that sets how far ahead people look.
 #' Settings, all optional:
 #'
 #' * `models`: the models offered (default: all).
@@ -822,7 +818,7 @@ dashboard_validate_plotters <- function(plotters) {
 #'   offered models).
 #' * `defaults$display_names`: the variables plotted when the tab opens.
 #'   Defaults to `irf$defaults$display_names`.
-#' * `defaults$lambda`: the initial cognitive discounting parameter, between
+#' * `defaults$lambda`: the initial anticipation parameter, between
 #'   0 and 1 (default 0.8).
 #'
 #' The sliders themselves are set by `instrument_display_name` and, rarely,
@@ -900,8 +896,9 @@ dashboard_validate_plotters <- function(plotters) {
 #'   given upper or lower bounds, in the same form.
 #' * `instrument_variable` and `instrument_shock`: the policy rate and
 #'   monetary policy shock, as display names or codes. Their defaults
-#'   (`"r_obs"` and `"eps_r"`) only suit RBA models, so set them, usually to
-#'   the same values as `instrument_display_name` and
+#'   (`"Cash Rate"` and `"Monetary policy shock"`) must match the metadata,
+#'   including capitalisation. Set them explicitly for other names or codes,
+#'   usually to the same values as `instrument_display_name` and
 #'   `instrument_shock_name`.
 #'
 #' Worth setting for a good first view, all optional:
@@ -1125,7 +1122,7 @@ dashboard_validate_plotters <- function(plotters) {
 #' # `data_end`) runs ten years past the Alternative Paths window.
 #' timeline$data_end <- as.Date("2038-06-01")
 #' # Optional past baselines for timeless commitment (see "Optimal Policy" below), e.g.
-#' # as built by the package repository's dashboard_example/build_us_baseline.R
+#' # as built by the package repository's dashboard_example/build_baselines/build_us_baseline.R
 #' vintages <- readxl::read_excel("inputs/us_vintages.xlsx", sheet = "vintages")
 #'
 #' config <- configure_dashboard(

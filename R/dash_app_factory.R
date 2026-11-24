@@ -55,7 +55,9 @@ dashboard_ui <- function(config) {
       },
       shiny::tabPanel("Alternative Policy Paths", value = "alt_paths", UITab_AltPaths("alt_paths", config)),
       shiny::tabPanel("Impulse Response Library", value = "irfs", UITab_IRF("irfs", config)),
-      shiny::tabPanel("Historical Shock Decompositions", value = "hsd", UITab_HistShockDecomp("hsd", config)),
+      if (length(config$hsd$models) > 0) {
+        shiny::tabPanel("Historical Shock Decompositions", value = "hsd", UITab_HistShockDecomp("hsd", config))
+      },
       #shiny::tabPanel("Variable Dictionary", value = "dictionary", UITab_Dictionary("dictionary", config)),
       if (isTRUE(config$optimal_policy$enabled)) {
         shiny::tabPanel("Optimal Policy", value = "optimal_policy", UITab_OptimalPolicy("optimal_policy", config))
@@ -77,7 +79,9 @@ dashboard_server <- function(config) {
       ServerTab_Overview("overview", config$overview)
     }
     ServerTab_IRF("irfs", config)
-    ServerTab_HistShockDecomp("hsd", config)
+    if (length(config$hsd$models) > 0) {
+      ServerTab_HistShockDecomp("hsd", config)
+    }
     ServerTab_AltPaths("alt_paths", config)
     #ServerTab_Dictionary("dictionary", config)
     if (isTRUE(config$optimal_policy$enabled)) {

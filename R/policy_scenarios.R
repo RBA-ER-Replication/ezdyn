@@ -105,14 +105,17 @@
 #' Under `"timeless"`, a bound on the policy instrument can also be marked
 #' `historical = TRUE`, so it is assumed to have been in place in every
 #' historical vintage as well, generating "make-up" policy today via the
-#' carried-forward Lagrange multipliers. This needs the instrument's level in
-#' `loss_variable_vintages`.
+#' plans made at earlier vintages. This needs the instrument's level in
+#' `loss_variable_vintages`. Marking a bound on any other variable
+#' `historical = TRUE` is an error.
 #'
 #' @param policy_strategy Named list with `output_name`, `output_variables`,
 #'   `loss_variables`, `loss_weights`, `discount_factor`, `T_loss`,
 #'   `T_instrument`, and `commit` (`"commit"`, `"timeless"`, or `"disc"`).
 #'   Optional `instrument_variable` and `instrument_shock` identify the model's
-#'   policy instrument and innovation. Variable entries (`output_variables`,
+#'   policy instrument and innovation (defaults: `"Cash Rate"` and
+#'   `"Monetary policy shock"`). These must match metadata capitalisation;
+#'   supply explicit names or codes if they differ. Variable entries (`output_variables`,
 #'   `loss_variables`, `instrument_variable`, and constraint `variable`s) may
 #'   be display names or dynare codes, resolved against `model`; a trailing
 #'   `_gap_loss` suffix is resolved on the underlying variable.
@@ -122,7 +125,7 @@
 #'   dynare code or its display name.
 #' @param model Full Dynare or custom-MOO pair.
 #' @param use_cd Whether to use partially anticipated policy shocks.
-#' @param lambda Cognitive-discounting parameter.
+#' @param lambda Anticipation parameter.
 #' @param forecast_start First forecast quarter.
 #' @param forecast_end Final forecast quarter.
 #' @param loss_variable_vintages Historical forecasts for timeless commitment,
@@ -182,9 +185,9 @@ get_policy_scenario <- function(
   output_variables_in <- unlist(policy_strategy$output_variables, use.names = FALSE)
   loss_variables_in <- unlist(policy_strategy$loss_variables, use.names = FALSE)
   instrument_variable_in <- policy_strategy$instrument_variable
-  if (is.null(instrument_variable_in)) instrument_variable_in <- "r_obs"
+  if (is.null(instrument_variable_in)) instrument_variable_in <- "Cash Rate"
   instrument_shock <- policy_strategy$instrument_shock
-  if (is.null(instrument_shock)) instrument_shock <- "eps_r"
+  if (is.null(instrument_shock)) instrument_shock <- "Monetary policy shock"
   constraints <- policy_strategy$constraints
   if (is.null(constraints)) constraints <- list()
   constraint_variables_in <- vapply(constraints, `[[`, character(1), "variable")
@@ -199,6 +202,18 @@ get_policy_scenario <- function(
     constraint
   }, constraints, constraint_variables_resolved)
   constraint_variables <- unique(constraint_variables_resolved)
+  # Historical bounds are always built on the instrument's response.
+  if (commit == "timeless") {
+    misplaced <- vapply(seq_along(constraints), function(i) {
+      isTRUE(constraints[[i]]$historical) && constraints[[i]]$variable != instrument_variable
+    }, logical(1))
+    if (any(misplaced)) {
+      stop(sprintf(
+        "Only a bound on the policy instrument (`%s`) can be marked `historical = TRUE`, but the bound(s) on %s are.",
+        instrument_variable_in, paste0("`", unique(constraint_variables_in[misplaced]), "`", collapse = ", ")
+      ), call. = FALSE)
+    }
+  }
 
   variables <- unique(c(output_variables, loss_variables, constraint_variables, instrument_variable))
   policy_variables <- unique(c(loss_variables, constraint_variables, instrument_variable))
@@ -391,7 +406,7 @@ get_policy_scenario <- function(
 #' @param baseline Wide baseline data frame shared by every model, as in
 #'   [get_policy_scenario()].
 #' @param use_cd Whether to use partially anticipated policy shocks.
-#' @param lambda Cognitive-discounting parameter.
+#' @param lambda Anticipation parameter.
 #' @param forecast_start First forecast quarter.
 #' @param forecast_end Final forecast quarter.
 #' @param loss_variable_vintages Past baselines for timeless commitment; see
@@ -478,7 +493,7 @@ ezdyn_policy_output_name <- function(strategy, model_name) {
 # strategy's policy shock that a model supplies.
 ezdyn_policy_anticipated_count <- function(model, strategy) {
   instrument_shock <- strategy$instrument_shock
-  if (is.null(instrument_shock)) instrument_shock <- "eps_r"
+  if (is.null(instrument_shock)) instrument_shock <- "Monetary policy shock"
   instrument_shock <- ezdyn_resolve_policy_shock_name(instrument_shock, model$M_)
   exogenous <- model$M_$exo.names
   if (is.null(exogenous)) exogenous <- model$M_$exo.vars
@@ -499,9 +514,9 @@ ezdyn_policy_scenario_for_model <- function(strategy, model, model_name, baselin
   strategy$output_name <- ezdyn_policy_output_name(strategy, model_name)
 
   instrument_variable <- strategy$instrument_variable
-  if (is.null(instrument_variable)) instrument_variable <- "r_obs"
+  if (is.null(instrument_variable)) instrument_variable <- "Cash Rate"
   instrument_shock <- strategy$instrument_shock
-  if (is.null(instrument_shock)) instrument_shock <- "eps_r"
+  if (is.null(instrument_shock)) instrument_shock <- "Monetary policy shock"
   constraint_variables <- vapply(strategy$constraints, `[[`, character(1), "variable")
 
   variables <- unique(c(
@@ -633,13 +648,14 @@ ezdyn_cached_policy_irfs <- function(cache, model, model_name, variables, horizo
 #' @param horizon Response horizon.
 #' @param instrument_horizon Policy-shock horizon.
 #' @param use_cd Whether to use partially anticipated policy shocks.
-#' @param lambda Cognitive-discounting parameter.
-#' @param instrument_shock Shock description or model code for the policy innovation.
+#' @param lambda Anticipation parameter.
+#' @param instrument_shock Shock description or model code for the policy innovation
+#'   (default `"Monetary policy shock"`).
 #'
 #' @return A variables by horizon by instrument-horizon array in displayed units,
 #'   named by `model`'s own resolved dynare codes.
 #' @export
-build_policy_irfs <- function(model, variables, horizon, instrument_horizon, use_cd = FALSE, lambda = 0, instrument_shock = "eps_r") {
+build_policy_irfs <- function(model, variables, horizon, instrument_horizon, use_cd = FALSE, lambda = 0, instrument_shock = "Monetary policy shock") {
   ezdyn_validate_policy_model(model)
   variables <- ezdyn_resolve_policy_variable_names(variables, model$M_)
   instrument_shock <- ezdyn_resolve_policy_shock_name(instrument_shock, model$M_)
@@ -1231,7 +1247,8 @@ ezdyn_policy_timeless <- function(history, dY, weights, discount_factor, constra
   horizon <- dim(history)[2] - preloss
   instruments <- dim(dY)[3] - preloss
   expectation_lagged <- rep(0, n_loss * (preloss + horizon))
-  multiplier_lagged <- rep(0, preloss + instruments)
+  multiplier_lagged <- numeric()
+  period_lagged <- integer()
   for (period in seq_len(preloss + 1L)) {
     loss_horizon <- preloss + horizon - period + 1L
     instrument_horizon <- preloss + instruments - period + 1L
@@ -1243,7 +1260,11 @@ ezdyn_policy_timeless <- function(history, dY, weights, discount_factor, constra
     )
     W <- diag(as.vector(weights %o% discount_factor^(0:(loss_horizon - 1L))))
     H <- crossprod(response, W %*% response)
-    f <- crossprod(response, W %*% (Y0 - expectation_lagged)) + multiplier_lagged
+    # Carried multipliers belong to this quarter's leading (historical) rows.
+    carried <- seq_along(multiplier_lagged)
+    stopifnot(identical(constraints[[period]]$period[carried], period_lagged))
+    f <- crossprod(response, W %*% (Y0 - expectation_lagged)) -
+      crossprod(constraints[[period]]$A_ineq[carried, , drop = FALSE], multiplier_lagged)
     solution <- ezdyn_policy_constrained_solution((H + t(H)) / 2, f, constraints[[period]])
     shocks <- solution$shocks
     expectation <- Y0 + as.numeric(response %*% shocks)
@@ -1251,16 +1272,15 @@ ezdyn_policy_timeless <- function(history, dY, weights, discount_factor, constra
     # Carry forward only the multipliers on constraints dated after this
     # quarter. Those constraints reappear, with fresh multipliers, in the
     # next quarter's problem, so their old multipliers enter its first-order
-    # condition with the opposite sign. This quarter's constraints are past
-    # by then: their effect is already captured by measuring the next
-    # quarter's loss against this plan's expected path (`expectation_lagged`),
-    # so carrying them too would count them twice.
+    # condition with the opposite sign, weighted by that quarter's own
+    # constraint rows (its shocks are news with that quarter's responses).
+    # This quarter's constraints are past by then: their effect is already
+    # captured by measuring the next quarter's loss against this plan's
+    # expected path (`expectation_lagged`), so carrying them too would count
+    # them twice.
     future <- constraints[[period]]$period > 1L
-    multiplier <- -crossprod(
-      constraints[[period]]$A_ineq[future, , drop = FALSE],
-      solution$multiplier[future]
-    )
-    multiplier_lagged <- multiplier[-1] / discount_factor
+    multiplier_lagged <- solution$multiplier[future] / discount_factor
+    period_lagged <- constraints[[period]]$period[future] - 1L
   }
   shocks
 }

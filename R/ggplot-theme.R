@@ -120,10 +120,7 @@ ezdyn_element_note_text_rba <- function(family = NULL, face = NULL, colour = NUL
 
 #' RBA theme
 #'
-#' @description This is a ggplot theme that matches Bank standards, which are
-#' available
-#' here: \href{https://trimweb.rba.gov.au/record/4345163}{Guide to Graphing at
-#' RBA}. See \code{\link[ggplot2:theme]{ggplot2::theme()}} for extra explanation
+#' @description This is a ggplot theme See \code{\link[ggplot2:theme]{ggplot2::theme()}} for extra explanation
 #' of theme aspects.
 #'
 #' @note Applied by default when you use `ggrba`. If you are adding it manually,
