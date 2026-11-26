@@ -1,4 +1,5 @@
 # ezdyn
+[Live demo](https://01a1b082-f2eb-61b6-a308-c4c2c0261a0c.share.connect.posit.cloud/)
 
 `ezdyn` is an R package that aims to make policy analysis with (suites of) dynamic
 economic models frictionless. Applying techniques from the ‘sufficient-statistics policy analysis’ literature, `ezdyn` can:
