@@ -11,7 +11,7 @@ web browser.
 Play with the
 [live demo](https://01a1b082-f2eb-61b6-a308-c4c2c0261a0c.share.connect.posit.cloud/). The
 [whitepaper](https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true)
-articulates what the package can do, and full documentation (including a quickstart guide).
+articulates what the package can do contains full documentation (including a quickstart guide).
 
 ![The Optimal Policy tab. The baseline paths plotted are dummy data, making the results of the
 exercise meaningless and illustrative.](tools/dashboard_screenshot.png)
