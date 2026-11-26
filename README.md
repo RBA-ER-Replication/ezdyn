@@ -1,7 +1,11 @@
 # ezdyn
 `ezdyn` is an R package that aims to make policy analysis with (suites of) dynamic
 economic models frictionless. Applying techniques from the ‘sufficient-statistics policy analysis’ literature, `ezdyn` can:
-- complete analytical tasks (e.g. policy counterfactuals, optimal policy exercises, impulse response analysis, historical shock decompositions) across suites of models in a single line of code.
+- complete analytical tasks across suites of models in a single line of code:
+   - policy counterfactuals
+   - optimal policy exercises
+   - impulse response analysis
+   - historical shock decompositions
 -  easily build and publish
 interactive dashboards which allow such analysis to be completed code-free from your
 web browser.
