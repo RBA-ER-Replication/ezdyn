@@ -14,6 +14,9 @@ articulates what the package can do, and full documentation (including a quickst
 
 ![The Optimal Policy tab. The baseline paths plotted are dummy data, making the results of the
 exercise meaningless and illustrative.](tools/dashboard_screenshot.png)
+*Figure 1: The Optimal Policy tab. The baseline paths plotted are dummy data, making the results of the
+exercise meaningless and illustrative.*
+
 
 ## Quickstart
 
