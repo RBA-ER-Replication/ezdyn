@@ -8,7 +8,8 @@ web browser.
 
 `ezdyn` works with models exported from Dynare or just a dataframe of impulse responses.
 
-The
+Play with the
+[live demo](https://01a1b082-f2eb-61b6-a308-c4c2c0261a0c.share.connect.posit.cloud/). The
 [whitepaper](https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true)
 articulates what the package can do, and full documentation (including a quickstart guide).
 
