@@ -12,6 +12,9 @@ The
 [whitepaper](https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true)
 articulates what the package can do, and full documentation (including a quickstart guide).
 
+![The Optimal Policy tab. The baseline paths plotted are dummy data, making the results of the
+exercise meaningless and illustrative.](tools/dashboard_screenshot.png)
+
 ## Quickstart
 
 Online
