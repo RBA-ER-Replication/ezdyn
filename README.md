@@ -15,9 +15,7 @@ articulates what the package can do, and full documentation (including a quickst
 ## Quickstart
 
 Online
-[live demo](https://01a1b082-f2eb-61b6-a308-c4c2c0261a0c.share.connect.posit.cloud/). For usage longer than 5-10 minutes, please install the package yourself (below).
-
-To try ezdyn yourself:
+[live demo](https://01a1b082-f2eb-61b6-a308-c4c2c0261a0c.share.connect.posit.cloud/). For usage longer than 5-10 minutes, please install the package yourself:
 1. Install R and RStudio
 2. Install remotes package: `install.packages("remotes")`.
 3. Install ezdyn: `remotes::install_github("RBA-ER-Replication/ezdyn")`.
