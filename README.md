@@ -6,7 +6,7 @@ economic models frictionless. Applying techniques from the ‘sufficient-statist
 interactive dashboards which allow such analysis to be completed code-free from your
 web browser.
 
-It works with models exported from Dynare or just a dataframe of impulse responses.
+`ezdyn` works with models exported from Dynare or just a dataframe of impulse responses.
 
 The
 [whitepaper](https://github.com/RBA-ER-Replication/ezdyn/blob/main/ezdyn.pdf?raw=true)
@@ -16,7 +16,6 @@ articulates what the package can do, and full documentation (including a quickst
 exercise meaningless and illustrative.](tools/dashboard_screenshot.png)
 *Figure 1: The Optimal Policy tab. The baseline paths plotted are dummy data, making the results of the
 exercise meaningless and illustrative.*
-
 
 ## Quickstart
 
